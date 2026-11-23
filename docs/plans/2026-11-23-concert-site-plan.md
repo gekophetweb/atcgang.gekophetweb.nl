@@ -2,7 +2,7 @@
 
 **Site:** atcgang.gekophetweb.nl
 **Date:** 2026-11-23
-**Status:** Draft – open questions at the bottom need answers before Phase 1 starts.
+**Status:** Draft – all open questions answered; ready to turn into an implementation plan.
 
 ## 1. What we're building
 
@@ -66,7 +66,7 @@ A web app where people:
 | `web` | own multi-stage `Dockerfile` (build with pnpm → `node:22-slim` runtime, non-root user) | Listens on `:3000` inside Docker only – **no published ports**. Runs migrations on start. Healthcheck on `/healthz`. |
 | `db` | `postgres:17-alpine` | Only on the `backend` network (`internal: true`), so it can't reach or be reached from the internet. Credentials from `.env`. Volume `pgdata`. |
 | `cloudflared` | `cloudflare/cloudflared` | `tunnel run` with `TUNNEL_TOKEN` from `.env`. Public hostname `atcgang.gekophetweb.nl` → `http://web:3000`. |
-| `backup` | small cron image | Nightly `pg_dump` + rsync of the `photos` volume to a backup target; keeps 14 days. |
+| `backup` | small cron image with **restic** | Nightly `pg_dump` + `photos` volume → encrypted, deduplicated restic repo **off-site** (Backblaze B2 or Cloudflare R2) plus a second copy on a local disk/NAS; keeps 14 daily + 4 weekly. |
 
 The database being a separate service means it can later move to another machine or a managed Postgres by changing `DATABASE_URL` only.
 
@@ -91,7 +91,9 @@ docker-compose.dev.yml     dev override: Vite + tsx watch with hot reload, db po
 
 ### Deploy
 
-GitHub Actions on push to `main` (git-flow release/hotfix merges): build → test → push image to **GHCR** → on the host `docker compose pull && docker compose up -d` (manual at first; Watchtower or a deploy webhook later). `develop` builds the image but doesn't deploy.
+GitHub Actions on push to `main` (git-flow release/hotfix merges): build → test → push a multi-arch image (`linux/amd64` + `linux/arm64`) to **GHCR** tagged `:main` and `:<sha>`. `develop` builds and tests but doesn't publish `:main`.
+
+GitHub can't reach the home server (and shouldn't), so deploys are **pull-based**: a systemd timer on the host runs `deploy.sh` every 5 minutes – `docker compose pull web`, and if the image changed, `docker compose up -d web`, then check `/healthz` and roll back to the previous `:<sha>` if it fails. Running `deploy.sh` by hand deploys immediately.
 
 ## 3. Data model
 
@@ -230,7 +232,8 @@ Anyone can create an account. Consequences for the build:
 
 ## 8. Risks
 
-- **Single host** – if the Docker host is down, the site is down, and photos live on its disk. Mitigation: nightly off-host backups with a tested restore; storage interface allows moving photos to S3/R2 later.
+- **Single home server** – power cuts, internet outages and reboots take the site down, and photos live on its disk. Mitigation: all services `restart: unless-stopped` and Docker enabled at boot, a UPS if possible, a Cloudflare custom error page for when the tunnel is down, nightly off-site backups with a tested restore; the storage interface allows moving photos to S3/R2 later.
+- **Home upload bandwidth** – every photo view is served from home through the tunnel. Mitigation: grids load only the 400 px WebP thumbnails, lazy-loaded; the 1600 px version opens in the lightbox; originals only on explicit download. Photos are private so Cloudflare can't cache them for everyone, but `Cache-Control: private, max-age=86400` lets each browser keep them.
 - **Disk space** – open sign-up + photos can fill the disk. Mitigation: per-user quota, admin disk view, alert at 80 %.
 - **Email deliverability** – login codes in spam kill the email login. Set SPF/DKIM/DMARC on the sending domain from day one.
 - **HEIC from iPhones** – browsers can't show HEIC and prebuilt sharp can't decode it; convert in the browser before upload.
@@ -259,4 +262,4 @@ Anyone can create an account. Consequences for the build:
    - Apple's callback is a cross-site **POST**; the OAuth state cookie needs `SameSite=None; Secure` (Better Auth handles this – cover it in an E2E test).
    - Callback URLs for all four: `https://atcgang.gekophetweb.nl/api/auth/callback/{google|microsoft|apple|github}`; dev uses separate OAuth clients pointing at `localhost` (Apple doesn't allow `localhost` – test Apple through a dev tunnel hostname).
 5. ~~**Hosting**~~ **Decided: Docker + separate DB container + Cloudflare Tunnel** – see section 2a.
-6. **Docker host** – which machine runs it (home server, NAS, VPS)? Matters for CPU architecture (build `linux/arm64` too?), disk size for photos, and where backups go.
+6. ~~**Docker host**~~ **Decided: home server.** No port forwarding – the Cloudflare Tunnel is the only way in, and the home IP stays hidden. Images are built for amd64 and arm64 so the CPU type doesn't matter. Pull-based deploys (section 2a), off-site restic backups, and the outage/bandwidth measures in section 8 follow from this. Photos and Postgres data go on a disk with room to grow; the admin page alerts at 80 % full.
