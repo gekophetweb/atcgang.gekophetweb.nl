@@ -12,7 +12,7 @@ A web app where people:
 - **look back** at concerts they went to
 - **upload many photos** per concert at once
 - **tag photos** with free labels ("encore", "crowd", "merch") and/or **people**
-- sign in with **SSO** (Google / Microsoft / Apple) or **email + one-time login code**
+- sign in with **SSO** (Google / Microsoft / Apple / GitHub) or **email + one-time login code**
 - talk to their data from Claude or another AI client through an **MCP server**
 
 ### Non-goals (v1)
@@ -34,7 +34,7 @@ A web app where people:
 | Thumbnails | **sharp** in a pg-boss job: 400 px + 1600 px WebP per photo | No external image service needed |
 | Frontend | **React + Vite + TanStack Router/Query + Tailwind** | SPA served by the `web` container |
 | Calendar | **FullCalendar** (MIT core: dayGrid, list, interaction) | Mature month/week/list views |
-| Auth | **Better Auth** on Postgres – `emailOTP` plugin + Google/Microsoft/Apple providers | Email code + SSO in one library |
+| Auth | **Better Auth** on Postgres – `emailOTP` plugin + Google/Microsoft/Apple/GitHub providers | Email code + SSO in one library |
 | Email | **Resend** | Reliable transactional mail for login codes and notifications |
 | MCP | **`@modelcontextprotocol/sdk`** Streamable HTTP mounted in Hono at `/mcp`, OAuth via **Better Auth's MCP / OIDC-provider plugin** | Claude/other clients log in with the same account via OAuth; no API keys to copy around |
 | Tests | Vitest against a throwaway Postgres container (Testcontainers), Playwright for a few E2E flows | Tests run against the real database |
@@ -77,7 +77,7 @@ Dockerfile                 multi-stage build for web
 docker-compose.yml         production: web, db, cloudflared, backup
 docker-compose.dev.yml     dev override: Vite + tsx watch with hot reload, db port 5432 exposed to localhost, no tunnel
 .env.example               DATABASE_URL, POSTGRES_*, TUNNEL_TOKEN, BETTER_AUTH_SECRET,
-                           GOOGLE_*/MICROSOFT_*/APPLE_*, RESEND_API_KEY, TURNSTILE_*, PHOTO_DIR
+                           GOOGLE_*/MICROSOFT_*/APPLE_*/GITHUB_*, RESEND_API_KEY, TURNSTILE_*, PHOTO_DIR
 .dockerignore
 ```
 
@@ -121,7 +121,7 @@ notifications    id, user_id, type, payload_json, read_at, created_at
 
 ## 4. Features per screen
 
-**Sign in** – email field → "send code" → 6-digit code screen (10 min expiry, 5 attempts, rate-limited per IP + email). Buttons for Google / Microsoft / Apple. Same email via different methods = same account (verified-email linking).
+**Sign in** – email field → "send code" → 6-digit code screen (10 min expiry, 5 attempts, rate-limited per IP + email). Buttons for Google / Microsoft / Apple / GitHub. Same email via different methods = same account (verified-email linking).
 
 **Concerts – list view** – tabs *Upcoming* / *Past*; grouped by month; search on artist/venue/city; filter by status, year, person. Each row: date, artist, venue/city, people avatars, photo count.
 
@@ -191,7 +191,7 @@ Resources: `concert://{id}` for detail. Photo bytes are never streamed through M
 Repo scaffold (pnpm, Vite, Hono, Drizzle), `Dockerfile`, `docker-compose.yml` + dev override, `.env.example`, Postgres migrations on start, `/healthz`. Create the Cloudflare Tunnel and route atcgang.gekophetweb.nl to `web:3000`. CI: lint, typecheck, tests, build image → GHCR. *Done when:* `docker compose up` on the host serves a "hello" page at the real domain, and the DB port is not reachable from outside Docker.
 
 **Phase 1 – Auth (2 days)**
-Better Auth on Postgres, email OTP via Resend, Google + Microsoft + Apple (see question 4), linking extra sign-in methods in Settings, sign-in pages, session middleware, Turnstile + rate limiting on `CF-Connecting-IP`. *Done when:* both methods log into the same account and tests cover code expiry/attempt limits.
+Better Auth on Postgres, email OTP via Resend, Google + Microsoft + Apple + GitHub (see question 4), linking extra sign-in methods in Settings, sign-in pages, session middleware, Turnstile + rate limiting on `CF-Connecting-IP`. *Done when:* email code and each SSO provider log into the same account (same verified email) and tests cover code expiry/attempt limits.
 
 **Phase 2 – Concerts (2 days)**
 Schema + CRUD API, list view with Upcoming/Past, search & filters, concert detail, people on a concert, invites, .ics export.
@@ -249,13 +249,14 @@ Anyone can create an account. Consequences for the build:
    - a **settings toggle** per user for email notifications (default on; in-app always on);
    - the tagged user can **remove their own tag** (untag me), but not the photo.
    Untagging before the batch is sent cancels that email. Same notification system is reused for concert invites accepted and new photos in a shared concert (in-app only). In Phase 5.
-4. ~~**Which SSO providers**~~ **Decided: Google, Microsoft and Apple**, all in Phase 1 (+½ day). Notes for the build:
+4. ~~**Which SSO providers**~~ **Decided: Google, Microsoft, Apple and GitHub**, all in Phase 1 (+½ day). Notes for the build:
    - **Google:** OAuth client in Google Cloud Console; consent screen must be published (not "testing") for open sign-up.
    - **Microsoft:** Entra ID app registration with tenant `common` so both personal (outlook/hotmail) and work/school accounts work.
    - **Apple:** needs the Apple Developer Program (€99/yr), an App ID + Services ID with the domain and return URL verified, and a `.p8` key. Apple's client secret is a JWT that **expires after at most 6 months** – generate it from the key at startup instead of storing a fixed secret, so it never silently expires.
    - **Apple "Hide My Email":** users may sign in with a `@privaterelay.appleid.com` address. That won't match their real email, so it creates a separate account instead of linking – allow linking extra sign-in methods from Settings while logged in. To deliver login codes and notifications to relay addresses, register the Resend sending domain under *Sign in with Apple for Email Communication* in the Apple developer account.
+   - **GitHub:** a GitHub **OAuth App** (not a GitHub App) with scope `user:email`. Many GitHub users keep their email private, so fetch `/user/emails` and use the **primary verified** address; refuse sign-in if there is none. An OAuth App allows only one callback URL, so use separate apps for production and dev.
    - **Apple sends the user's name only on the first sign-in** – store it then.
    - Apple's callback is a cross-site **POST**; the OAuth state cookie needs `SameSite=None; Secure` (Better Auth handles this – cover it in an E2E test).
-   - Callback URLs for all three: `https://atcgang.gekophetweb.nl/api/auth/callback/{google|microsoft|apple}`; dev uses separate OAuth clients pointing at `localhost` (Apple doesn't allow `localhost` – test Apple through a dev tunnel hostname).
+   - Callback URLs for all four: `https://atcgang.gekophetweb.nl/api/auth/callback/{google|microsoft|apple|github}`; dev uses separate OAuth clients pointing at `localhost` (Apple doesn't allow `localhost` – test Apple through a dev tunnel hostname).
 5. ~~**Hosting**~~ **Decided: Docker + separate DB container + Cloudflare Tunnel** – see section 2a.
 6. **Docker host** – which machine runs it (home server, NAS, VPS)? Matters for CPU architecture (build `linux/arm64` too?), disk size for photos, and where backups go.
