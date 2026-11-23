@@ -179,6 +179,12 @@ Estimate goes up by about 2–3 days.
 
 1. ~~**Who uses it?**~~ **Decided: open sign-up** – see section 7a.
 2. ~~**Shared or personal concerts?**~~ **Decided: one shared entry.** Friends at the same show are members of one concert and all add photos to it. Because concerts are private, two friends may each create the same show before inviting each other – so when an invite is accepted and the invitee already has a concert with the same artist on the same date, offer to **merge** them (photos, people, notes move into the shared one; the duplicate is deleted). Merge added to Phase 8.
-3. **Tagged people** – should tagging a friend who has an account notify them or make the photo show up in their own view?
+3. ~~**Tagged people**~~ **Decided: notify and show it.** When a photo is tagged with a person linked to a registered user who is a member of that concert:
+   - the photo appears on their **"Photos of me"** page (query over `photo_people` → `people.linked_user_id`, filtered by concert membership);
+   - they get an **in-app notification** (bell icon, unread count) – new table `notifications (id, user_id, type, payload_json, read_at, created_at)`;
+   - they get an **email**, batched: tags within the same 15 minutes are grouped into one mail ("Anna tagged you in 12 photos from Foo Fighters, Ziggo Dome"), sent by a Cloudflare Queue / scheduled job so bulk tagging never sends a flood;
+   - a **settings toggle** per user for email notifications (default on; in-app always on);
+   - the tagged user can **remove their own tag** (untag me), but not the photo.
+   Untagging before the batch is sent cancels that email. Same notification system is reused for concert invites accepted and new photos in a shared concert (in-app only). Added to Phase 5 (+1 day).
 4. **Which SSO providers** do you actually want? (Plan: Google + Microsoft first, Apple optional.)
 5. **Hosting** – OK with Cloudflare, or do you have an existing server/host for gekophetweb.nl?
