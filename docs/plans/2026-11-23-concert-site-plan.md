@@ -74,11 +74,14 @@ The database being a separate service means it can later move to another machine
 
 ```
 Dockerfile                 multi-stage build for web
-docker-compose.yml         production: web, db, cloudflared, backup
-docker-compose.dev.yml     dev override: Vite + tsx watch with hot reload, db port 5432 exposed to localhost, no tunnel
+deploy/docker-compose.yml  production: web, db, cloudflared, backup
+docker-compose.dev.yml     dev override of deploy/docker-compose.yml: Vite + tsx watch with hot reload, db port 5432 exposed to localhost, no tunnel
 .env.example               DATABASE_URL, POSTGRES_*, TUNNEL_TOKEN, BETTER_AUTH_SECRET,
                            GOOGLE_*/MICROSOFT_*/APPLE_*/GITHUB_*, RESEND_API_KEY, TURNSTILE_*, PHOTO_DIR
 .dockerignore
+deploy/update.sh           crontab update script – see section 2b
+deploy/update.conf.example
+deploy/logrotate.conf
 ```
 
 ### What the tunnel changes in the app
@@ -93,7 +96,82 @@ docker-compose.dev.yml     dev override: Vite + tsx watch with hot reload, db po
 
 GitHub Actions on push to `main` (git-flow release/hotfix merges): build → test → push a multi-arch image (`linux/amd64` + `linux/arm64`) to **GHCR** tagged `:main` and `:<sha>`. `develop` builds and tests but doesn't publish `:main`.
 
-GitHub can't reach the home server (and shouldn't), so deploys are **pull-based**: a systemd timer on the host runs `deploy.sh` every 5 minutes – `docker compose pull web`, and if the image changed, `docker compose up -d web`, then check `/healthz` and roll back to the previous `:<sha>` if it fails. Running `deploy.sh` by hand deploys immediately.
+GitHub can't reach the home server (and shouldn't), so deploys are **pull-based**: an update script on the host, run from **crontab** – see section 2b.
+
+## 2b. Update script (`deploy/update.sh`, run from crontab)
+
+A single Bash script on the home server that checks for a new release and deploys it safely. Safe to run every few minutes: it does nothing (and prints nothing) when there is no update.
+
+### Install layout on the host
+
+```
+/opt/atcgang/                 sparse git checkout of `main`, only the deploy/ folder
+  deploy/update.sh
+  deploy/docker-compose.yml
+  deploy/update.conf.example
+  .env                        secrets (never in git)
+  update.conf                 optional overrides (see below)
+  state/                      last-good image digest, pre-update DB dumps
+/var/log/atcgang/update.log   rotated weekly by logrotate (config shipped in deploy/)
+```
+
+`docker-compose.yml` references the web image as `${WEB_IMAGE:-ghcr.io/gekophetweb/atcgang-web:main}`, so the script can pin an exact digest for rollback. If the GHCR package is private, run `docker login ghcr.io` once with a read-only (`read:packages`) token.
+
+### What one run does
+
+1. **Lock** – `flock -n` on `/var/lock/atcgang-update.lock`; if another run is busy, exit quietly (exit 3).
+2. **Update deploy files** – `git pull --ff-only` in `/opt/atcgang`. If `docker-compose.yml` changed, remember to re-apply all services in step 6.
+3. **Check for a new image** – `docker compose pull web`, then compare the pulled image ID with the one the running `web` container uses. Same image and no compose change → exit 0, no output.
+4. **Remember the current version** – save the running image's repo digest to `state/last-good`.
+5. **Snapshot the database** – `pg_dump -Fc` via `docker compose exec -T db` into `state/pre-update-<timestamp>.dump`; keep the last 5. Abort the update if the dump fails.
+6. **Deploy** – `docker compose up -d --no-deps web` (or `docker compose up -d` for everything if the compose file changed). The new container runs database migrations on start.
+7. **Health check** – wait up to 120 s for the container healthcheck to be `healthy`, then `curl` `https://atcgang.gekophetweb.nl/healthz` through the tunnel to prove the whole path works.
+8. **On failure, roll back** – start `web` again with `WEB_IMAGE=<last-good digest>` and re-check health. The database is **not** restored automatically (that would throw away anything users saved in the meantime); the dump from step 5 is there for a manual `update.sh --restore-db <file>`. Because of this, migrations follow the *expand → contract* rule: a release may only add columns/tables; removing old ones happens in a later release, so the previous image always still works with the new schema.
+9. **Clean up** – `docker image prune -f --filter until=168h` (keeps the last-good image).
+10. **Report** – one timestamped log line per step. Output only on a deploy or an error, so cron's `MAILTO` mails only when something happened. Optional `NOTIFY_URL` (ntfy / Discord / Slack webhook) gets a message on success and failure.
+
+### Options
+
+| Flag | Does |
+|---|---|
+| *(none)* | normal check-and-deploy, as above |
+| `--force` | redeploy even if the image didn't change |
+| `--dry-run` | show what would happen, change nothing |
+| `--all` | also pull and restart `db` (same Postgres major only – the tag is pinned to `17`), `cloudflared` and `backup` |
+| `--tag <sha>` | deploy a specific build instead of `:main` |
+| `--rollback` | go back to `state/last-good` |
+| `--restore-db <file>` | stop `web`, restore a dump, start `web` (asks for confirmation unless `--yes`) |
+
+### Exit codes
+
+`0` nothing to do or deployed fine · `1` deploy failed, rolled back OK · `2` deploy **and** rollback failed (site down – notify loudly) · `3` another run is busy · `4` config/precondition error (no Docker, no `.env`, git pull not fast-forward).
+
+### `update.conf` (all optional)
+
+```
+WEB_IMAGE_REPO=ghcr.io/gekophetweb/atcgang-web
+CHANNEL=main                 # image tag to follow
+HEALTH_URL=https://atcgang.gekophetweb.nl/healthz
+HEALTH_TIMEOUT=120
+KEEP_DUMPS=5
+NOTIFY_URL=
+```
+
+### Crontab
+
+```
+MAILTO=you@example.com
+# check for a new release every 5 minutes
+*/5 * * * *  /opt/atcgang/deploy/update.sh >> /var/log/atcgang/update.log 2>&1
+# weekly: also update Postgres minor version, cloudflared and backup images (Sunday 04:30)
+30 4 * * 0   /opt/atcgang/deploy/update.sh --all >> /var/log/atcgang/update.log 2>&1
+```
+
+(Run as a user in the `docker` group, not root. Cron has a minimal `PATH`, so the script sets its own `PATH` and `cd`s to its own folder.)
+
+### Testing the script
+
+`shellcheck` in CI, plus **bats** tests that run the script with stubbed `docker`, `git` and `curl` commands to cover: no update, normal deploy, failed health check → rollback, failed rollback, lock held, `--dry-run` changing nothing. Built in **Phase 0**, and exercised for real on the home server before Phase 1 starts.
 
 ## 3. Data model
 
@@ -189,8 +267,8 @@ Resources: `concert://{id}` for detail. Photo bytes are never streamed through M
 
 ## 7. Phases
 
-**Phase 0 – Setup (1 day)**
-Repo scaffold (pnpm, Vite, Hono, Drizzle), `Dockerfile`, `docker-compose.yml` + dev override, `.env.example`, Postgres migrations on start, `/healthz`. Create the Cloudflare Tunnel and route atcgang.gekophetweb.nl to `web:3000`. CI: lint, typecheck, tests, build image → GHCR. *Done when:* `docker compose up` on the host serves a "hello" page at the real domain, and the DB port is not reachable from outside Docker.
+**Phase 0 – Setup (1½ days)**
+Repo scaffold (pnpm, Vite, Hono, Drizzle), `Dockerfile`, `docker-compose.yml` + dev override, `.env.example`, Postgres migrations on start, `/healthz`. Create the Cloudflare Tunnel and route atcgang.gekophetweb.nl to `web:3000`. CI: lint, typecheck, tests, shellcheck + bats, build image → GHCR. `deploy/update.sh` + crontab on the home server (section 2b). *Done when:* the home server serves a "hello" page at the real domain, the DB port is not reachable from outside Docker, and a push to `main` reaches the site through the cron update – including one deliberately broken release that rolls back on its own.
 
 **Phase 1 – Auth (2 days)**
 Better Auth on Postgres, email OTP via Resend, Google + Microsoft + Apple + GitHub (see question 4), linking extra sign-in methods in Settings, sign-in pages, session middleware, Turnstile + rate limiting on `CF-Connecting-IP`. *Done when:* email code and each SSO provider log into the same account (same verified email) and tests cover code expiry/attempt limits.
