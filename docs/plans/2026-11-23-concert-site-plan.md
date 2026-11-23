@@ -190,8 +190,8 @@ Resources: `concert://{id}` for detail. Photo bytes are never streamed through M
 **Phase 0 – Setup (1 day)**
 Repo scaffold (pnpm, Vite, Hono, Drizzle), `Dockerfile`, `docker-compose.yml` + dev override, `.env.example`, Postgres migrations on start, `/healthz`. Create the Cloudflare Tunnel and route atcgang.gekophetweb.nl to `web:3000`. CI: lint, typecheck, tests, build image → GHCR. *Done when:* `docker compose up` on the host serves a "hello" page at the real domain, and the DB port is not reachable from outside Docker.
 
-**Phase 1 – Auth (1–2 days)**
-Better Auth on Postgres, email OTP via Resend, Google + Microsoft (Apple later), sign-in pages, session middleware, Turnstile + rate limiting on `CF-Connecting-IP`. *Done when:* both methods log into the same account and tests cover code expiry/attempt limits.
+**Phase 1 – Auth (2 days)**
+Better Auth on Postgres, email OTP via Resend, Google + Microsoft + Apple (see question 4), linking extra sign-in methods in Settings, sign-in pages, session middleware, Turnstile + rate limiting on `CF-Connecting-IP`. *Done when:* both methods log into the same account and tests cover code expiry/attempt limits.
 
 **Phase 2 – Concerts (2 days)**
 Schema + CRUD API, list view with Upcoming/Past, search & filters, concert detail, people on a concert, invites, .ics export.
@@ -236,7 +236,7 @@ Anyone can create an account. Consequences for the build:
 - **HEIC from iPhones** – browsers can't show HEIC and prebuilt sharp can't decode it; convert in the browser before upload.
 - **Privacy** – photos of friends: photo volume is never exposed directly, every photo request goes through an access check, URLs given to MCP/email are signed and short-lived.
 - **Tunnel token** – anyone with `TUNNEL_TOKEN` can serve the domain. Keep it only in `.env` on the host (never committed); rotate if leaked.
-- **Apple SSO** needs an Apple Developer account (€99/yr) – can ship without it.
+- **Apple SSO** – €99/yr developer account, client-secret JWT that expires every 6 months, and private-relay emails; handled as described in question 4.
 
 ## 9. Open questions
 
@@ -249,6 +249,13 @@ Anyone can create an account. Consequences for the build:
    - a **settings toggle** per user for email notifications (default on; in-app always on);
    - the tagged user can **remove their own tag** (untag me), but not the photo.
    Untagging before the batch is sent cancels that email. Same notification system is reused for concert invites accepted and new photos in a shared concert (in-app only). In Phase 5.
-4. **Which SSO providers** do you actually want? (Plan: Google + Microsoft first, Apple optional.)
+4. ~~**Which SSO providers**~~ **Decided: Google, Microsoft and Apple**, all in Phase 1 (+½ day). Notes for the build:
+   - **Google:** OAuth client in Google Cloud Console; consent screen must be published (not "testing") for open sign-up.
+   - **Microsoft:** Entra ID app registration with tenant `common` so both personal (outlook/hotmail) and work/school accounts work.
+   - **Apple:** needs the Apple Developer Program (€99/yr), an App ID + Services ID with the domain and return URL verified, and a `.p8` key. Apple's client secret is a JWT that **expires after at most 6 months** – generate it from the key at startup instead of storing a fixed secret, so it never silently expires.
+   - **Apple "Hide My Email":** users may sign in with a `@privaterelay.appleid.com` address. That won't match their real email, so it creates a separate account instead of linking – allow linking extra sign-in methods from Settings while logged in. To deliver login codes and notifications to relay addresses, register the Resend sending domain under *Sign in with Apple for Email Communication* in the Apple developer account.
+   - **Apple sends the user's name only on the first sign-in** – store it then.
+   - Apple's callback is a cross-site **POST**; the OAuth state cookie needs `SameSite=None; Secure` (Better Auth handles this – cover it in an E2E test).
+   - Callback URLs for all three: `https://atcgang.gekophetweb.nl/api/auth/callback/{google|microsoft|apple}`; dev uses separate OAuth clients pointing at `localhost` (Apple doesn't allow `localhost` – test Apple through a dev tunnel hostname).
 5. ~~**Hosting**~~ **Decided: Docker + separate DB container + Cloudflare Tunnel** – see section 2a.
 6. **Docker host** – which machine runs it (home server, NAS, VPS)? Matters for CPU architecture (build `linux/arm64` too?), disk size for photos, and where backups go.
