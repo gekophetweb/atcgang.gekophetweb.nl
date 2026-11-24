@@ -1,0 +1,25 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import type { Hono } from "hono";
+import { serveStatic } from "@hono/node-server/serve-static";
+
+const API_PREFIXES = ["/api", "/mcp", "/photos", "/.well-known", "/healthz"];
+
+/** Serves the built SPA: hashed assets cached forever, everything else falls back to index.html. */
+export function serveClient(app: Hono, clientDir: string) {
+  const indexPath = path.join(clientDir, "index.html");
+  app.use(
+    "/assets/*",
+    serveStatic({
+      root: clientDir,
+      onFound: (_p, c) => c.header("Cache-Control", "public, max-age=31536000, immutable"),
+    }),
+  );
+  app.use("*", serveStatic({ root: clientDir }));
+  app.get("*", (c) => {
+    if (API_PREFIXES.some((p) => c.req.path === p || c.req.path.startsWith(`${p}/`))) return c.notFound();
+    if (!existsSync(indexPath)) return c.text("Client not built", 404);
+    c.header("Cache-Control", "no-cache");
+    return c.html(readFileSync(indexPath, "utf8"));
+  });
+}

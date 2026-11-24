@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+@theme {
+  --color-accent: #f97316;
+}
+
+html { color-scheme: dark; }
+body { font-family: ui-sans-serif, system-ui, sans-serif; }
