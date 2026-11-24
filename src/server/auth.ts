@@ -1,7 +1,10 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { APIError, createAuthMiddleware } from "better-auth/api";
-import { captcha, emailOTP } from "better-auth/plugins";
+import { captcha, emailOTP, jwt } from "better-auth/plugins";
+import { mcp } from "@better-auth/mcp";
+import { cimd } from "@better-auth/cimd";
+import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import { importPKCS8, SignJWT } from "jose";
 import { eq } from "drizzle-orm";
 import type { Config } from "./config.js";
@@ -71,6 +74,8 @@ function socialProviders(config: Config, appleSecret?: string): BetterAuthOption
   return p;
 }
 
+export const mcpResource = (config: Config) => `${config.BASE_URL}/mcp`;
+
 export function enabledProviders(config: Config, appleSecret?: string): string[] {
   return Object.keys(socialProviders(config, appleSecret) ?? {});
 }
@@ -100,6 +105,17 @@ export function createAuth(deps: AuthDeps) {
           }),
         ]
       : []),
+    // MCP: this app is the OAuth 2.1 authorization server for its own /mcp endpoint.
+    jwt(),
+    mcp({
+      loginPage: "/login",
+      consentPage: "/consent",
+      resource: mcpResource(config),
+      // Older MCP clients register themselves dynamically; newer ones use Client ID Metadata Documents.
+      allowDynamicClientRegistration: true,
+      allowUnauthenticatedClientRegistration: true,
+    }),
+    cimd({ fetchClientMetadataResource, metadataProfile: "mcp-2026-07-28" }),
     ...(deps.extraPlugins ?? []),
   ];
 

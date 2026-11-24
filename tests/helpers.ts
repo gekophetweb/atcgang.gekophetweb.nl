@@ -40,10 +40,10 @@ export async function testServices(
   return s as TestServices;
 }
 
-/** Empties every table in the public schema. */
+/** Empties every table in the public schema, except state the auth server seeds once per process. */
 export async function resetDb(db: Db) {
   const rows = await db.execute<{ tablename: string }>(
-    sql`select tablename from pg_tables where schemaname = 'public'`,
+    sql`select tablename from pg_tables where schemaname = 'public' and tablename not in ('oauth_resource', 'jwks')`,
   );
   const names = rows.map((r) => `"${r.tablename}"`);
   if (names.length) await db.execute(sql.raw(`truncate ${names.join(", ")} restart identity cascade`));

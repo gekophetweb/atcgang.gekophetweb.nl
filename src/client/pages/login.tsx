@@ -68,9 +68,15 @@ export function LoginPage() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { error } = await authClient.signIn.emailOtp({ email, otp: code.trim() });
+    const { data, error } = await authClient.signIn.emailOtp({ email, otp: code.trim() });
     setBusy(false);
     if (error) return setError(error.message ?? "That code didn't work");
+    // Signing in for an MCP client: continue the OAuth flow (consent screen).
+    const next = (data as { url?: string; redirect?: boolean } | null)?.url;
+    if (next) {
+      window.location.href = next;
+      return;
+    }
     await qc.invalidateQueries({ queryKey: ["me"] });
     navigate({ to: redirect });
   }

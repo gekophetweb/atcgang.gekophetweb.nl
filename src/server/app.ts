@@ -10,6 +10,7 @@ import type { Storage } from "./lib/storage.js";
 import type { Jobs } from "./lib/jobs.js";
 import type { AppNotifier } from "./domain/notifications.js";
 import { photoApiRoutes, photoFileRoutes } from "./routes/photos.js";
+import { mcpRoutes } from "./mcp/route.js";
 import { concertRoutes } from "./routes/concerts.js";
 import { peopleRoutes } from "./routes/people.js";
 import { serveClient } from "./static.js";
@@ -48,8 +49,11 @@ export function createApp(deps: AppDeps) {
   });
 
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+  // OAuth discovery for MCP clients (authorization server + protected resource metadata).
+  app.on(["GET", "HEAD"], "/.well-known/*", (c) => auth.handler(c.req.raw));
 
   app.use("/api/*", sessionMiddleware(auth));
+  app.route("/", mcpRoutes(deps));
 
   app.get("/api/config", (c) =>
     c.json({ providers: deps.providers, turnstileSiteKey: config.TURNSTILE_SITE_KEY ?? null }),
