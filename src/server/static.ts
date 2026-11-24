@@ -6,7 +6,8 @@ import { serveStatic } from "@hono/node-server/serve-static";
 const API_PREFIXES = ["/api", "/mcp", "/photos", "/.well-known", "/healthz"];
 
 /** Serves the built SPA: hashed assets cached forever, everything else falls back to index.html. */
-export function serveClient(app: Hono, clientDir: string) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function serveClient(app: Hono<any>, clientDir: string) {
   const indexPath = path.join(clientDir, "index.html");
   app.use(
     "/assets/*",
