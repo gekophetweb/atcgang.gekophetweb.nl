@@ -117,6 +117,21 @@ describe("site settings", () => {
     expect(s.settings.sso.google.clientSecret).toBe("g-secret");
   });
 
+  it("accepts Apple's form_post callback from appleid.apple.com", async () => {
+    const admin = await user(s, "admin@example.com");
+    const { generateKeyPairSync } = await import("node:crypto");
+    const pem = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    await admin.api.put("/api/admin/settings/sso", { apple: { enabled: true, clientId: "nl.example.web", teamId: "TEAM123456", keyId: "KEY1234567", privateKey: pem } });
+    expect((await (await s.app.request("/api/config")).json()).providers).toEqual(["apple"]);
+    // Apple POSTs cross-site; a browser that still has a session cookie sends it along.
+    const res = await s.app.request("/api/auth/callback/apple", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "https://appleid.apple.com", cookie: admin.cookie },
+      body: "code=abc&state=xyz",
+    });
+    expect(res.status).toBe(302);
+  });
+
   it("encrypts with the app secret and builds the right mailer", () => {
     const enc = encrypt("secret-a", "hello");
     expect(decrypt("secret-a", enc)).toBe("hello");
