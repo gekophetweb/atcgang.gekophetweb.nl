@@ -6,3 +6,18 @@
 
 html { color-scheme: dark; }
 body { font-family: ui-sans-serif, system-ui, sans-serif; }
+
+/* FullCalendar dark tweaks */
+.atc-calendar {
+  --fc-border-color: #27272a;
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: #18181b;
+  --fc-list-event-hover-bg-color: #27272a;
+  --fc-today-bg-color: rgb(249 115 22 / 0.08);
+  --fc-button-bg-color: #27272a;
+  --fc-button-border-color: #3f3f46;
+  --fc-button-hover-bg-color: #3f3f46;
+  --fc-button-active-bg-color: #f97316;
+  --fc-button-text-color: #f4f4f5;
+}
+.atc-calendar a { color: inherit; }

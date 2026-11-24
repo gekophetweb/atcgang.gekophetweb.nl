@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { api, qs } from "../lib/api";
 import { STATUS_LABELS, type Concert, type Person } from "../types";
 import { NewConcertButton } from "../components/concert-form";
+import { useRedirectToPreferredView, ViewToggle } from "../components/view-toggle";
 import { Avatar, cx, Empty, Input, PageTitle, Select, Spinner } from "../ui";
 
 const monthKey = (d: Date) => d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
@@ -66,6 +67,7 @@ export function ConcertRow({ c }: { c: Concert }) {
 }
 
 export function ConcertsPage() {
+  useRedirectToPreferredView();
   const [tab, setTab] = useStored<"upcoming" | "past">("concerts.tab", "upcoming");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
@@ -89,7 +91,16 @@ export function ConcertsPage() {
   const thisYear = new Date().getFullYear();
   return (
     <div>
-      <PageTitle actions={<NewConcertButton />}>Concerts</PageTitle>
+      <PageTitle
+        actions={
+          <>
+            <ViewToggle current="list" />
+            <NewConcertButton />
+          </>
+        }
+      >
+        Concerts
+      </PageTitle>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg bg-zinc-900 p-1" role="tablist">
           {(["upcoming", "past"] as const).map((t) => (

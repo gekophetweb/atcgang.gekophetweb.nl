@@ -96,6 +96,15 @@ describe("concerts CRUD and privacy", () => {
     expect(byPerson[0].people).toEqual([{ id: person.id, name: "Bob", linkedUserId: null }]);
   });
 
+  it("returns concerts in a calendar date range [from, to)", async () => {
+    const anna = await user(s, "anna@example.com");
+    await create(anna.api, { artist: "In", startsAt: "2027-05-10T20:00:00Z" });
+    await create(anna.api, { artist: "Edge", startsAt: "2027-06-01T00:00:00Z" });
+    await create(anna.api, { artist: "Before", startsAt: "2027-04-30T20:00:00Z" });
+    const list = await (await anna.api.get("/api/concerts?from=2027-05-01T00:00:00Z&to=2027-06-01T00:00:00Z")).json();
+    expect(list.map((c: { artist: string }) => c.artist)).toEqual(["In"]);
+  });
+
   it("updates and deletes", async () => {
     const anna = await user(s, "anna@example.com");
     const c = await create(anna.api);
