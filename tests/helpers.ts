@@ -24,7 +24,11 @@ export async function testServices(
   serviceOverrides: Omit<ServiceOverrides, "mailer"> = {},
 ): Promise<TestServices> {
   const mailer = new MemoryMailer();
-  const s = await createServices(testConfig(overrides), { ...serviceOverrides, mailer });
+  const s = await createServices(testConfig(overrides), {
+    otpLimits: { perEmail: 10_000, perIp: 10_000 },
+    ...serviceOverrides,
+    mailer,
+  });
   return s as TestServices;
 }
 

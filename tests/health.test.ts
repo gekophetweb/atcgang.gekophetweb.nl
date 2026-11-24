@@ -19,6 +19,7 @@ describe("health and static", () => {
 
   it("does not fall back to the SPA for unknown API paths", async () => {
     const res = await s.app.request("/api/does-not-exist");
-    expect(res.status).toBe(404);
+    expect([401, 404]).toContain(res.status);
+    expect(res.headers.get("content-type")).toContain("application/json");
   });
 });

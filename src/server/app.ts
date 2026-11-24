@@ -6,6 +6,9 @@ import type { Db } from "./db/client.js";
 import type { Config } from "./config.js";
 import type { Auth } from "./auth.js";
 import type { Mailer } from "./lib/mailer.js";
+import type { Storage } from "./lib/storage.js";
+import { concertRoutes } from "./routes/concerts.js";
+import { peopleRoutes } from "./routes/people.js";
 import { serveClient } from "./static.js";
 import { requireUser, sessionMiddleware, type Env } from "./context.js";
 
@@ -15,6 +18,13 @@ export interface AppDeps {
   auth: Auth;
   mailer: Mailer;
   providers: string[];
+  storage: Storage;
+  notify?: Notifier;
+}
+
+/** Notification hooks (Phase 5); optional so features work without them. */
+export interface Notifier {
+  inviteAccepted(inviterId: string, accepter: { id: string; name: string; email: string }, concertId: string): Promise<void>;
 }
 
 export function createApp(deps: AppDeps) {
@@ -46,6 +56,14 @@ export function createApp(deps: AppDeps) {
   );
 
   app.get("/api/me", requireUser, (c) => c.json({ user: c.get("user") }));
+
+  app.use("/api/*", async (c, next) => {
+    // Everything below needs a session, except the invite preview.
+    if (c.req.method === "GET" && /^\/api\/invites\/[^/]+$/.test(c.req.path)) return next();
+    return requireUser(c, next);
+  });
+  app.route("/api", concertRoutes(deps));
+  app.route("/api", peopleRoutes(deps));
 
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
 

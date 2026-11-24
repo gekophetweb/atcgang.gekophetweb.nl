@@ -16,7 +16,7 @@ import {
   testServices,
 } from "./helpers.js";
 
-const s = await testServices();
+const s = await testServices({}, { otpLimits: { perEmail: 5, perIp: 20 } });
 afterAll(() => s.close());
 beforeEach(async () => {
   await resetDb(s.db);

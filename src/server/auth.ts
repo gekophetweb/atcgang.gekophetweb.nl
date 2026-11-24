@@ -25,6 +25,8 @@ export interface AuthDeps {
   extraPlugins?: BetterAuthOptions["plugins"];
   /** Apple client secret, generated from the .p8 key at startup (see appleClientSecret). */
   appleClientSecret?: string;
+  /** Login-code send limits per hour (tests raise them). */
+  otpLimits?: { perEmail: number; perIp: number };
 }
 
 /** Apple's client secret is a JWT that may live at most 6 months; build it from the key instead of storing it. */
@@ -75,8 +77,9 @@ export function enabledProviders(config: Config, appleSecret?: string): string[]
 
 export function createAuth(deps: AuthDeps) {
   const { config, db, mailer } = deps;
-  const perEmail = new RateLimiter(5, 60 * 60 * 1000);
-  const perIp = new RateLimiter(20, 60 * 60 * 1000);
+  const limits = deps.otpLimits ?? { perEmail: 5, perIp: 20 };
+  const perEmail = new RateLimiter(limits.perEmail, 60 * 60 * 1000);
+  const perIp = new RateLimiter(limits.perIp, 60 * 60 * 1000);
 
   const plugins: NonNullable<BetterAuthOptions["plugins"]> = [
     emailOTP({
