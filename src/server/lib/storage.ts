@@ -81,6 +81,10 @@ export class VolumeStorage implements Storage {
   }
 
   async deletePrefix(prefix: string) {
+    if (prefix.endsWith("/")) {
+      await rm(this.file(prefix.slice(0, -1)), { force: true, recursive: true });
+      return;
+    }
     const dir = path.dirname(this.file(prefix + "x"));
     const base = path.basename(prefix);
     const names = await readdir(dir).catch(() => [] as string[]);

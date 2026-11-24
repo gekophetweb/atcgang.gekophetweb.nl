@@ -7,6 +7,8 @@ import type { Config } from "./config.js";
 import type { Auth } from "./auth.js";
 import type { Mailer } from "./lib/mailer.js";
 import type { Storage } from "./lib/storage.js";
+import type { Jobs } from "./lib/jobs.js";
+import { photoApiRoutes, photoFileRoutes } from "./routes/photos.js";
 import { concertRoutes } from "./routes/concerts.js";
 import { peopleRoutes } from "./routes/people.js";
 import { serveClient } from "./static.js";
@@ -19,6 +21,7 @@ export interface AppDeps {
   mailer: Mailer;
   providers: string[];
   storage: Storage;
+  jobs: Jobs;
   notify?: Notifier;
 }
 
@@ -64,8 +67,11 @@ export function createApp(deps: AppDeps) {
   });
   app.route("/api", concertRoutes(deps));
   app.route("/api", peopleRoutes(deps));
+  app.route("/api", photoApiRoutes(deps));
 
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
+
+  app.route("/", photoFileRoutes(deps));
 
   serveClient(app, config.CLIENT_DIR);
   return app;

@@ -4,10 +4,13 @@ import { appleClientSecret, createAuth, enabledProviders } from "./auth.js";
 import { ConsoleMailer, ResendMailer, type Mailer } from "./lib/mailer.js";
 import { createApp } from "./app.js";
 import { VolumeStorage, type Storage } from "./lib/storage.js";
+import { PgBossJobs, type Jobs } from "./lib/jobs.js";
+import { makeThumbnails } from "./domain/photos.js";
 
 export interface ServiceOverrides {
   mailer?: Mailer;
   storage?: Storage;
+  jobs?: Jobs;
   otpLimits?: { perEmail: number; perIp: number };
 }
 
@@ -20,8 +23,15 @@ export async function createServices(config: Config, overrides: ServiceOverrides
   const auth = createAuth({ config, db, mailer, appleClientSecret: appleSecret, otpLimits: overrides.otpLimits });
   const providers = enabledProviders(config, appleSecret);
   const storage = overrides.storage ?? new VolumeStorage(config.PHOTO_DIR);
-  const app = createApp({ config, db, auth, mailer, providers, storage });
-  return { config, db, sql, mailer, auth, app, providers, storage, close: () => sql.end({ timeout: 5 }) };
+  const jobs = overrides.jobs ?? new PgBossJobs(config.DATABASE_URL);
+  jobs.register("thumbnails", (d) => makeThumbnails(db, storage, String(d.photoId)));
+  const app = createApp({ config, db, auth, mailer, providers, storage, jobs });
+  return { config, db, sql, mailer, auth, app, providers, storage, jobs,
+    close: async () => {
+      await jobs.stop();
+      await sql.end({ timeout: 5 });
+    },
+  };
 }
 
 export type Services = Awaited<ReturnType<typeof createServices>>;

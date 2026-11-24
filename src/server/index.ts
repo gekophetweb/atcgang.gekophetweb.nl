@@ -6,6 +6,7 @@ import { createServices } from "./services.js";
 const config = loadConfig();
 await runMigrations(config.DATABASE_URL);
 const services = await createServices(config);
+await services.jobs.start();
 
 const server = serve({ fetch: services.app.fetch, port: config.PORT }, (info) => {
   console.log(`web listening on :${info.port} (sso: ${services.providers.join(", ") || "none"})`);

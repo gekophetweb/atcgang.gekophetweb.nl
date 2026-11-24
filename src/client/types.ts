@@ -79,4 +79,5 @@ export interface Photo {
   people: { id: string; name: string; x: number | null; y: number | null; linkedUserId: string | null; mine: boolean }[];
   concert?: { artist: string; startsAt: string; venue: string };
   canEdit: boolean;
+  canDelete: boolean;
 }

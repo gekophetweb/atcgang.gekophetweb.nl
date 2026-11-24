@@ -2,6 +2,10 @@ import { sql } from "drizzle-orm";
 import { loadConfig, type Config } from "../src/server/config.js";
 import { createServices, type Services, type ServiceOverrides } from "../src/server/services.js";
 import { MemoryMailer } from "../src/server/lib/mailer.js";
+import { ManualJobs } from "../src/server/lib/jobs.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { Db } from "../src/server/db/client.js";
 
 export function testConfig(overrides: Partial<Record<string, string>> = {}): Config {
@@ -17,14 +21,17 @@ export function testConfig(overrides: Partial<Record<string, string>> = {}): Con
   });
 }
 
-export type TestServices = Services & { mailer: MemoryMailer };
+export type TestServices = Services & { mailer: MemoryMailer; jobs: ManualJobs };
 
 export async function testServices(
   overrides: Partial<Record<string, string>> = {},
   serviceOverrides: Omit<ServiceOverrides, "mailer"> = {},
 ): Promise<TestServices> {
   const mailer = new MemoryMailer();
-  const s = await createServices(testConfig(overrides), {
+  const jobs = new ManualJobs();
+  const photoDir = mkdtempSync(path.join(tmpdir(), "atc-photos-"));
+  const s = await createServices(testConfig({ PHOTO_DIR: photoDir, ...overrides }), {
+    jobs,
     otpLimits: { perEmail: 10_000, perIp: 10_000 },
     ...serviceOverrides,
     mailer,
