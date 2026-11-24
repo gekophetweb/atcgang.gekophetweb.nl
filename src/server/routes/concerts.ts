@@ -22,6 +22,7 @@ import {
   updateConcert,
 } from "../domain/concerts.js";
 import { toIcs } from "../lib/ics.js";
+import { concertStats, validTimeZone } from "../domain/stats.js";
 import { inviteMail } from "../mail-templates.js";
 import { concerts } from "../db/schema.js";
 import { requireConcertRole } from "../access.js";
@@ -80,6 +81,8 @@ export function concertRoutes(deps: AppDeps) {
       "content-disposition": `attachment; filename="${filename}"`,
     });
   });
+
+  r.get("/stats", async (c) => c.json(await concertStats(db, currentUser(c).id, new Date(), validTimeZone(c.req.query("tz")))));
 
   // Members
   r.patch("/concerts/:id/members/:userId", async (c) => {
