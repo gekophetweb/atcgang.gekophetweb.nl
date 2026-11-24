@@ -3,7 +3,8 @@ import path from "node:path";
 import type { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 
-const API_PREFIXES = ["/api", "/mcp", "/photos", "/.well-known", "/healthz"];
+// /photos/<id>/<variant> is handled by the photo route before this; /photos and /photos/me are SPA pages.
+const API_PREFIXES = ["/api", "/mcp", "/.well-known", "/healthz"];
 
 /** Serves the built SPA: hashed assets cached forever, everything else falls back to index.html. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

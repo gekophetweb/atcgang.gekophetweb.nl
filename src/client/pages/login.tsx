@@ -77,7 +77,8 @@ export function LoginPage() {
       window.location.href = next;
       return;
     }
-    await qc.invalidateQueries({ queryKey: ["me"] });
+    // Drop the cached "signed out" answer so the app shell asks again.
+    qc.removeQueries({ queryKey: ["me"] });
     navigate({ to: redirect });
   }
 

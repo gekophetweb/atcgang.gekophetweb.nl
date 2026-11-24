@@ -17,6 +17,14 @@ describe("health and static", () => {
     expect(await res.text()).toContain("fixture spa");
   });
 
+  it("serves the SPA for /photos and /photos/me (only photo file URLs are server routes)", async () => {
+    for (const p of ["/photos", "/photos/me"]) {
+      const res = await s.app.request(p);
+      expect(res.status, p).toBe(200);
+      expect(await res.text()).toContain("fixture spa");
+    }
+  });
+
   it("does not fall back to the SPA for unknown API paths", async () => {
     const res = await s.app.request("/api/does-not-exist");
     expect([401, 404]).toContain(res.status);

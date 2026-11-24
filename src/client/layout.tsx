@@ -93,6 +93,11 @@ export function Layout({ me, children }: { me: Me; children: ReactNode }) {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-1">
+            {me.role === "admin" && (
+              <Link to="/admin" className="hidden rounded-lg px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 md:block [&.active]:bg-zinc-800">
+                Admin
+              </Link>
+            )}
             <Bell />
             <Link to="/settings" className="rounded-lg p-1 hover:bg-zinc-800" aria-label="Settings">
               <Avatar name={me.name || me.email} src={me.image} />

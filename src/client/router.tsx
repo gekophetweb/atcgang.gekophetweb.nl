@@ -1,4 +1,5 @@
-import { createRootRoute, createRoute, createRouter, Navigate, Outlet, useLocation } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { createRootRoute, createRoute, createRouter, Outlet, useNavigate } from "@tanstack/react-router";
 import { Layout, useMe } from "./layout";
 import { Spinner } from "./ui";
 import { LoginPage } from "./pages/login";
@@ -16,15 +17,20 @@ import { ConsentPage } from "./pages/consent";
 import { PrivacyPage, TermsPage } from "./pages/legal";
 
 function Authed() {
-  const { data: me, isLoading } = useMe();
-  const loc = useLocation();
-  if (isLoading)
+  const { data: me, isLoading, isFetching } = useMe();
+  const navigate = useNavigate();
+  const signedOut = !isFetching && !me;
+  useEffect(() => {
+    if (!signedOut) return;
+    const here = window.location.pathname + window.location.search;
+    navigate({ to: "/login", search: here === "/" ? {} : { redirect: here }, replace: true });
+  }, [signedOut, navigate]);
+  if (isLoading || !me)
     return (
       <div className="grid min-h-screen place-items-center">
         <Spinner />
       </div>
     );
-  if (!me) return <Navigate to="/login" search={{ redirect: loc.href }} />;
   return (
     <Layout me={me}>
       <Outlet />
