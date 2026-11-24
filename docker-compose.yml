@@ -62,6 +62,25 @@ services:
     networks: [backend, frontend]
     depends_on: [db]
 
+  # One-off restore with write access to the photo volume:  docker compose run --rm restore
+  restore:
+    build: ./backup
+    profiles: [restore]
+    command: restore.sh
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+    volumes:
+      - photos:/data/photos
+      - ${BACKUP_LOCAL_DIR:-./backups}:/backups/local
+    networks: [backend, frontend]
+    depends_on: [db]
+
 networks:
   frontend:
   backend:
