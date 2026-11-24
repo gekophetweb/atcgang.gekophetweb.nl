@@ -112,7 +112,7 @@ export function concertRoutes(deps: AppDeps) {
   r.post("/invites/:token/accept", async (c) => {
     const me = currentUser(c);
     const res = await acceptInvite(db, me.id, c.req.param("token"));
-    if (!res.alreadyMember) await deps.notify?.inviteAccepted(res.invitedBy, me, res.concertId);
+    if (!res.alreadyMember) await deps.notify.inviteAccepted(res.invitedBy, me, res.concertId);
     return c.json(res);
   });
 

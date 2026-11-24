@@ -4,29 +4,14 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { signPhotoUrl } from "../src/server/lib/signed-url.js";
 import { keys, sniffMime } from "../src/server/domain/photos.js";
-import { resetDb, testServices, user, type TestServices } from "./helpers.js";
+import { jpeg, resetDb, testServices, upload, user, type TestServices } from "./helpers.js";
 
 const s = await testServices();
 afterAll(() => s.close());
 beforeEach(() => resetDb(s.db));
 
-type U = Awaited<ReturnType<typeof user>>;
 
-export async function jpeg(w = 1200, h = 800) {
-  return sharp({ create: { width: w, height: h, channels: 3, background: { r: 200, g: 80, b: 20 } } })
-    .jpeg()
-    .toBuffer();
-}
-
-export async function upload(svc: TestServices, u: U, concertId: string, body: Buffer, headers: Record<string, string> = {}) {
-  return svc.app.request(`/api/concerts/${concertId}/photos`, {
-    method: "POST",
-    headers: { cookie: u.cookie, origin: "http://localhost:3000", "content-type": "image/jpeg", "content-length": String(body.length), ...headers },
-    body: new Uint8Array(body),
-  });
-}
-
-async function concertOf(u: U) {
+async function concertOf(u: Awaited<ReturnType<typeof user>>) {
   return (await (await u.api.post("/api/concerts", { artist: "Foo Fighters", startsAt: "2026-06-01T19:00:00Z" })).json()) as { id: string };
 }
 

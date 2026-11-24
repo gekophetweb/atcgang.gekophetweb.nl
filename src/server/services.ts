@@ -6,6 +6,7 @@ import { createApp } from "./app.js";
 import { VolumeStorage, type Storage } from "./lib/storage.js";
 import { PgBossJobs, type Jobs } from "./lib/jobs.js";
 import { makeThumbnails } from "./domain/photos.js";
+import { createNotifier } from "./domain/notifications.js";
 
 export interface ServiceOverrides {
   mailer?: Mailer;
@@ -25,8 +26,10 @@ export async function createServices(config: Config, overrides: ServiceOverrides
   const storage = overrides.storage ?? new VolumeStorage(config.PHOTO_DIR);
   const jobs = overrides.jobs ?? new PgBossJobs(config.DATABASE_URL);
   jobs.register("thumbnails", (d) => makeThumbnails(db, storage, String(d.photoId)));
-  const app = createApp({ config, db, auth, mailer, providers, storage, jobs });
-  return { config, db, sql, mailer, auth, app, providers, storage, jobs,
+  const notify = createNotifier({ db, jobs, mailer, baseUrl: config.BASE_URL, secret: config.BETTER_AUTH_SECRET });
+  jobs.register("tag-emails", (d) => notify.sendTagEmail(String(d.batchId)));
+  const app = createApp({ config, db, auth, mailer, providers, storage, jobs, notify });
+  return { config, db, sql, mailer, auth, app, providers, storage, jobs, notify,
     close: async () => {
       await jobs.stop();
       await sql.end({ timeout: 5 });

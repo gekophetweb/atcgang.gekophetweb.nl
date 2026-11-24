@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import sharp from "sharp";
 import { loadConfig, type Config } from "../src/server/config.js";
 import { createServices, type Services, type ServiceOverrides } from "../src/server/services.js";
 import { MemoryMailer } from "../src/server/lib/mailer.js";
@@ -123,3 +124,18 @@ export async function user(s: TestServices, email: string) {
   const me = await (await as(s, cookie).get("/api/me")).json();
   return { id: me.user.id as string, email, cookie, api: as(s, cookie) };
 }
+
+export async function jpeg(w = 1200, h = 800) {
+  return sharp({ create: { width: w, height: h, channels: 3, background: { r: 200, g: 80, b: 20 } } })
+    .jpeg()
+    .toBuffer();
+}
+
+export async function upload(svc: TestServices, u: { cookie: string }, concertId: string, body: Buffer, headers: Record<string, string> = {}) {
+  return svc.app.request(`/api/concerts/${concertId}/photos`, {
+    method: "POST",
+    headers: { cookie: u.cookie, origin: "http://localhost:3000", "content-type": "image/jpeg", "content-length": String(body.length), ...headers },
+    body: new Uint8Array(body),
+  });
+}
+

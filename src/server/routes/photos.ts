@@ -6,6 +6,8 @@ import type { AppDeps } from "../app.js";
 import { currentUser, type Env } from "../context.js";
 import { concertRole } from "../access.js";
 import { deletePhoto, getPhoto, keys, listPhotos, photoFilters, updatePhoto, uploadPhoto, usedBytes } from "../domain/photos.js";
+import { bulkTag, untagMe } from "../domain/tagging.js";
+import { listNotifications, markRead, unreadCount } from "../domain/notifications.js";
 import { verifyPhotoSignature, type Variant } from "../lib/signed-url.js";
 import { photos } from "../db/schema.js";
 import { eq } from "drizzle-orm";
@@ -30,6 +32,8 @@ export function photoApiRoutes(deps: AppDeps) {
       takenAt: optDate(c.req.header("x-taken-at")),
       caption: caption ? decodeURIComponent(caption).slice(0, 500) : null,
     });
+    const me = currentUser(c);
+    await deps.notify.photosAdded({ id: me.id, name: me.name || me.email }, photo.concertId, photo.id);
     return c.json({ id: photo.id, bytes: photo.bytes, thumbsReady: photo.thumbsReady }, 201);
   });
 
@@ -44,6 +48,26 @@ export function photoApiRoutes(deps: AppDeps) {
   });
   r.delete("/photos/:id", async (c) => {
     await deletePhoto(db, storage, currentUser(c).id, c.req.param("id"));
+    return c.body(null, 204);
+  });
+
+  r.post("/photos/bulk-tag", async (c) => {
+    const me = currentUser(c);
+    const res = await bulkTag(db, me.id, await c.req.json());
+    await deps.notify.tagged({ id: me.id, name: me.name || me.email }, res.photoIds, res.newlyTaggedPeople);
+    return c.json({ ok: true, photos: res.photoIds.length });
+  });
+  r.delete("/photos/:id/people/me", async (c) => {
+    const id = c.req.param("id");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return c.json({ error: "Photo not found" }, 404);
+    return c.json({ removed: await untagMe(db, currentUser(c).id, id) });
+  });
+
+  r.get("/notifications", async (c) => c.json(await listNotifications(db, currentUser(c).id)));
+  r.get("/notifications/unread-count", async (c) => c.json({ unread: await unreadCount(db, currentUser(c).id) }));
+  r.patch("/notifications", async (c) => {
+    const body = z.object({ ids: z.array(z.string().uuid()).max(200).optional(), all: z.boolean().optional() }).parse(await c.req.json());
+    await markRead(db, currentUser(c).id, body.all ? "all" : (body.ids ?? []));
     return c.body(null, 204);
   });
 

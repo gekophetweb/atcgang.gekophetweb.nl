@@ -8,6 +8,7 @@ import type { Auth } from "./auth.js";
 import type { Mailer } from "./lib/mailer.js";
 import type { Storage } from "./lib/storage.js";
 import type { Jobs } from "./lib/jobs.js";
+import type { AppNotifier } from "./domain/notifications.js";
 import { photoApiRoutes, photoFileRoutes } from "./routes/photos.js";
 import { concertRoutes } from "./routes/concerts.js";
 import { peopleRoutes } from "./routes/people.js";
@@ -22,13 +23,9 @@ export interface AppDeps {
   providers: string[];
   storage: Storage;
   jobs: Jobs;
-  notify?: Notifier;
+  notify: AppNotifier;
 }
 
-/** Notification hooks (Phase 5); optional so features work without them. */
-export interface Notifier {
-  inviteAccepted(inviterId: string, accepter: { id: string; name: string; email: string }, concertId: string): Promise<void>;
-}
 
 export function createApp(deps: AppDeps) {
   const { config, db, auth } = deps;

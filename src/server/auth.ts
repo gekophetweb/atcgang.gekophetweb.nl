@@ -162,6 +162,14 @@ export function createAuth(deps: AuthDeps) {
       }),
     },
     databaseHooks: {
+      user: {
+        create: {
+          // Email-code sign-ups have no name yet: start with the part before the @.
+          async before(user) {
+            return { data: { ...user, name: user.name?.trim() || user.email.split("@")[0]! } };
+          },
+        },
+      },
       session: {
         create: {
           async before(session) {
