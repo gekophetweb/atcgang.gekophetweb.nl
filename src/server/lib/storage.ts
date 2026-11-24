@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readdir, rm, stat, statfs } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, stat, statfs } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -14,6 +14,8 @@ export interface Storage {
   get(key: string): Promise<Buffer>;
   stream(key: string): Promise<{ stream: Readable; size: number } | null>;
   delete(key: string): Promise<void>;
+  /** Moves a file to a new key (no-op if the source is missing). */
+  move(from: string, to: string): Promise<void>;
   /** Removes every key under a prefix (e.g. a photo's original + thumbnails). */
   deletePrefix(prefix: string): Promise<void>;
   /** Disk usage of the volume, for the admin page. */
@@ -74,6 +76,14 @@ export class VolumeStorage implements Storage {
     } catch {
       return null;
     }
+  }
+
+  async move(from: string, to: string) {
+    const dest = this.file(to);
+    await mkdir(path.dirname(dest), { recursive: true });
+    await rename(this.file(from), dest).catch((e: NodeJS.ErrnoException) => {
+      if (e.code !== "ENOENT") throw e;
+    });
   }
 
   async delete(key: string) {

@@ -35,6 +35,13 @@ const schema = z.object({
     .optional()
     .transform((v) => v !== "false"),
   DISK_ALERT_PERCENT: z.coerce.number().default(80),
+  /** Comma-separated emails that get the admin role. */
+  ADMIN_EMAILS: z
+    .string()
+    .optional()
+    .transform((v) => (v ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)),
+  /** Dev/E2E only: append sent mail as JSON lines to this file instead of sending it. */
+  MAIL_OUTBOX_FILE: optional,
 });
 
 export type Config = z.infer<typeof schema>;

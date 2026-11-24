@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { exportPKCS8, generateKeyPair, decodeJwt, decodeProtectedHeader } from "jose";
 import { users } from "../src/server/db/schema.js";
 import { appleClientSecret, OTP_ATTEMPTS } from "../src/server/auth.js";
+import { ssoFromEnv } from "../src/server/settings.js";
 import {
   as,
   codeFrom,
@@ -125,7 +126,7 @@ describe("apple client secret", () => {
       APPLE_KEY_ID: "KEY123",
       APPLE_PRIVATE_KEY: pem.replace(/\n/g, "\\n"),
     });
-    const jwt = (await appleClientSecret(config))!;
+    const jwt = (await appleClientSecret(ssoFromEnv(config).apple))!;
     expect(decodeProtectedHeader(jwt)).toMatchObject({ alg: "ES256", kid: "KEY123" });
     const claims = decodeJwt(jwt);
     expect(claims).toMatchObject({ iss: "TEAM123", sub: "nl.gekophetweb.atcgang", aud: "https://appleid.apple.com" });
@@ -133,6 +134,6 @@ describe("apple client secret", () => {
   });
 
   it("is undefined when Apple isn't configured", async () => {
-    expect(await appleClientSecret(testConfig())).toBeUndefined();
+    expect(await appleClientSecret(ssoFromEnv(testConfig()).apple)).toBeUndefined();
   });
 });

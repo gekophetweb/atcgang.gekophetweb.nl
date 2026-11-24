@@ -274,6 +274,13 @@ export const notifications = pgTable(
   (t) => [index().on(t.userId, t.createdAt)],
 );
 
+/** Admin-editable settings (mail provider, SSO). Secret fields inside `value` are encrypted. */
+export const appSettings = pgTable("app_settings", {
+  key: text().primaryKey(),
+  value: jsonb().notNull().$type<Record<string, unknown>>(),
+  updatedAt: updated(),
+});
+
 /** Pending tag-notification emails, grouped per (tagger, tagged user, concert) within a 15-minute window. */
 export const tagEmailBatches = pgTable(
   "tag_email_batches",

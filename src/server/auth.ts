@@ -15,6 +15,7 @@ import { RateLimiter } from "./lib/rate-limit.js";
 import { clientIp } from "./lib/client-ip.js";
 import { isDisposableEmail } from "./lib/disposable-email.js";
 import { loginCodeMail } from "./mail-templates.js";
+import { ssoReady, type SsoEntry, type SsoSettings } from "./settings.js";
 
 export const OTP_EXPIRES_SECONDS = 600;
 export const OTP_ATTEMPTS = 5;
@@ -24,67 +25,54 @@ export interface AuthDeps {
   config: Config;
   db: Db;
   mailer: Mailer;
-  /** Extra Better Auth plugins (MCP provider is added in createAuth when enabled). */
-  extraPlugins?: BetterAuthOptions["plugins"];
-  /** Apple client secret, generated from the .p8 key at startup (see appleClientSecret). */
+  /** SSO credentials as currently configured (admin settings, else .env). */
+  sso: SsoSettings;
+  /** Apple client secret, generated from the .p8 key (see appleClientSecret). */
   appleClientSecret?: string;
-  /** Login-code send limits per hour (tests raise them). */
-  otpLimits?: { perEmail: number; perIp: number };
+  /** Shared across auth rebuilds so a settings change doesn't reset the limits. */
+  limiters?: { perEmail: RateLimiter; perIp: RateLimiter };
+  /** Extra Better Auth plugins. */
+  extraPlugins?: BetterAuthOptions["plugins"];
 }
 
 /** Apple's client secret is a JWT that may live at most 6 months; build it from the key instead of storing it. */
-export async function appleClientSecret(config: Config, now = new Date()): Promise<string | undefined> {
-  const { APPLE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY } = config;
-  if (!APPLE_CLIENT_ID || !APPLE_TEAM_ID || !APPLE_KEY_ID || !APPLE_PRIVATE_KEY) return undefined;
-  const key = await importPKCS8(APPLE_PRIVATE_KEY.replace(/\\n/g, "\n"), "ES256");
+export async function appleClientSecret(apple: SsoEntry, now = new Date()): Promise<string | undefined> {
+  const { clientId, teamId, keyId, privateKey } = apple;
+  if (!clientId || !teamId || !keyId || !privateKey) return undefined;
+  // Keys pasted into .env often carry literal "\n" sequences instead of line breaks.
+  const key = await importPKCS8(privateKey.replace(/\\n/g, "\n"), "ES256");
   const iat = Math.floor(now.getTime() / 1000);
   return new SignJWT({})
-    .setProtectedHeader({ alg: "ES256", kid: APPLE_KEY_ID })
-    .setIssuer(APPLE_TEAM_ID)
-    .setSubject(APPLE_CLIENT_ID)
+    .setProtectedHeader({ alg: "ES256", kid: keyId })
+    .setIssuer(teamId)
+    .setSubject(clientId)
     .setAudience("https://appleid.apple.com")
     .setIssuedAt(iat)
     .setExpirationTime(iat + 180 * 24 * 3600)
     .sign(key);
 }
 
-function socialProviders(config: Config, appleSecret?: string): BetterAuthOptions["socialProviders"] {
+function socialProviders(sso: SsoSettings, appleSecret?: string): NonNullable<BetterAuthOptions["socialProviders"]> {
   const p: NonNullable<BetterAuthOptions["socialProviders"]> = {};
-  if (config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET) {
-    p.google = { clientId: config.GOOGLE_CLIENT_ID, clientSecret: config.GOOGLE_CLIENT_SECRET, prompt: "select_account" };
+  const { google, microsoft, apple, github } = sso;
+  if (ssoReady("google", google)) p.google = { clientId: google.clientId!, clientSecret: google.clientSecret!, prompt: "select_account" };
+  if (ssoReady("microsoft", microsoft)) {
+    p.microsoft = { clientId: microsoft.clientId!, clientSecret: microsoft.clientSecret!, tenantId: "common", prompt: "select_account" };
   }
-  if (config.MICROSOFT_CLIENT_ID && config.MICROSOFT_CLIENT_SECRET) {
-    p.microsoft = {
-      clientId: config.MICROSOFT_CLIENT_ID,
-      clientSecret: config.MICROSOFT_CLIENT_SECRET,
-      tenantId: "common",
-      prompt: "select_account",
-    };
-  }
-  if (config.APPLE_CLIENT_ID && appleSecret) {
-    p.apple = {
-      clientId: config.APPLE_CLIENT_ID,
-      clientSecret: appleSecret,
-      appBundleIdentifier: config.APPLE_APP_BUNDLE_IDENTIFIER,
-    };
-  }
-  if (config.GITHUB_CLIENT_ID && config.GITHUB_CLIENT_SECRET) {
-    p.github = { clientId: config.GITHUB_CLIENT_ID, clientSecret: config.GITHUB_CLIENT_SECRET, scope: ["user:email"] };
-  }
+  if (ssoReady("apple", apple) && appleSecret) p.apple = { clientId: apple.clientId!, clientSecret: appleSecret };
+  if (ssoReady("github", github)) p.github = { clientId: github.clientId!, clientSecret: github.clientSecret!, scope: ["user:email"] };
   return p;
 }
 
 export const mcpResource = (config: Config) => `${config.BASE_URL}/mcp`;
 
-export function enabledProviders(config: Config, appleSecret?: string): string[] {
-  return Object.keys(socialProviders(config, appleSecret) ?? {});
+export function enabledProviders(sso: SsoSettings, appleSecret?: string): string[] {
+  return Object.keys(socialProviders(sso, appleSecret));
 }
 
 export function createAuth(deps: AuthDeps) {
   const { config, db, mailer } = deps;
-  const limits = deps.otpLimits ?? { perEmail: 5, perIp: 20 };
-  const perEmail = new RateLimiter(limits.perEmail, 60 * 60 * 1000);
-  const perIp = new RateLimiter(limits.perIp, 60 * 60 * 1000);
+  const { perEmail, perIp } = deps.limiters ?? defaultLimiters();
 
   const plugins: NonNullable<BetterAuthOptions["plugins"]> = [
     emailOTP({
@@ -152,7 +140,7 @@ export function createAuth(deps: AuthDeps) {
         allowDifferentEmails: true,
       },
     },
-    socialProviders: socialProviders(config, deps.appleClientSecret),
+    socialProviders: socialProviders(deps.sso, deps.appleClientSecret),
     rateLimit: {
       enabled: config.NODE_ENV !== "test",
       window: 60,
@@ -182,7 +170,10 @@ export function createAuth(deps: AuthDeps) {
         create: {
           // Email-code sign-ups have no name yet: start with the part before the @.
           async before(user) {
-            return { data: { ...user, name: user.name?.trim() || user.email.split("@")[0]! } };
+            // The very first account runs the site; ADMIN_EMAILS can name more admins.
+            const [any] = await db.select({ id: schema.users.id }).from(schema.users).limit(1);
+            const isAdmin = !any || config.ADMIN_EMAILS.includes(user.email.toLowerCase());
+            return { data: { ...user, name: user.name?.trim() || user.email.split("@")[0]!, ...(isAdmin ? { role: "admin" } : {}) } };
           },
         },
       },
@@ -203,3 +194,7 @@ export function createAuth(deps: AuthDeps) {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+export function defaultLimiters(perEmail = 5, perIp = 20) {
+  return { perEmail: new RateLimiter(perEmail, 60 * 60 * 1000), perIp: new RateLimiter(perIp, 60 * 60 * 1000) };
+}

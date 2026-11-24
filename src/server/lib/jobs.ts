@@ -1,6 +1,6 @@
 import { PgBoss } from "pg-boss";
 
-export type JobName = "thumbnails" | "tag-emails" | "account-deletion";
+export type JobName = "thumbnails" | "tag-emails" | "account-deletion" | "disk-check";
 type Handler = (data: Record<string, unknown>) => Promise<void>;
 
 export interface SendOpts {
@@ -12,6 +12,8 @@ export interface SendOpts {
 export interface Jobs {
   register(name: JobName, handler: Handler): void;
   send(name: JobName, data: Record<string, unknown>, opts?: SendOpts): Promise<void>;
+  /** Runs `name` on a cron schedule (UTC). */
+  schedule(name: JobName, cron: string): void;
   start(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -20,6 +22,7 @@ export class PgBossJobs implements Jobs {
   private boss: PgBoss;
   private handlers = new Map<JobName, Handler>();
   private started = false;
+  private schedules: [JobName, string][] = [];
 
   constructor(connectionString: string) {
     this.boss = new PgBoss({ connectionString });
@@ -28,6 +31,10 @@ export class PgBossJobs implements Jobs {
 
   register(name: JobName, handler: Handler) {
     this.handlers.set(name, handler);
+  }
+
+  schedule(name: JobName, cron: string) {
+    this.schedules.push([name, cron]);
   }
 
   async send(name: JobName, data: Record<string, unknown>, opts: SendOpts = {}) {
@@ -48,6 +55,7 @@ export class PgBossJobs implements Jobs {
         for (const job of jobs) await handler(job.data);
       });
     }
+    for (const [name, cron] of this.schedules) await this.boss.schedule(name, cron, {});
   }
 
   async stop() {
@@ -67,6 +75,7 @@ export class ManualJobs implements Jobs {
     if (opts.singletonKey && this.queue.some((j) => j.name === name && j.key === opts.singletonKey)) return;
     this.queue.push({ name, data, runAt: opts.startAfter?.getTime() ?? 0, key: opts.singletonKey });
   }
+  schedule() {}
   async start() {}
   async stop() {}
 
