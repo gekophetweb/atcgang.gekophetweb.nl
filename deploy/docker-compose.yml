@@ -1,18 +1,28 @@
+# Production stack. Paths are relative to this folder (deploy/); .env lives one level up.
+# From the repo root, plain `docker compose ...` finds this file through COMPOSE_FILE in .env.
 name: atcgang
 
 services:
   web:
     image: ${WEB_IMAGE:-ghcr.io/gekophetweb/atcgang.gekophetweb.nl:main}
-    build: .
+    build: ..
     restart: unless-stopped
     env_file:
-      - path: .env
+      - path: ../.env
         required: false
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       PHOTO_DIR: /data/photos
     volumes:
       - photos:/data/photos
+    # Same check as the Dockerfile, but probes every 2 s while starting so deploy/update.sh sees "healthy" quickly.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
     # No published ports: only cloudflared reaches web.
     networks: [frontend, backend]
     depends_on:
@@ -45,10 +55,10 @@ services:
     depends_on: [web]
 
   backup:
-    build: ./backup
+    build: ../backup
     restart: unless-stopped
     env_file:
-      - path: .env
+      - path: ../.env
         required: false
     environment:
       PGHOST: db
@@ -57,18 +67,18 @@ services:
       PGDATABASE: ${POSTGRES_DB}
     volumes:
       - photos:/data/photos:ro
-      - ${BACKUP_LOCAL_DIR:-./backups}:/backups/local
+      - ${BACKUP_LOCAL_DIR:-../backups}:/backups/local
     # backend to reach db, frontend for the off-site restic repo.
     networks: [backend, frontend]
     depends_on: [db]
 
   # One-off restore with write access to the photo volume:  docker compose run --rm restore
   restore:
-    build: ./backup
+    build: ../backup
     profiles: [restore]
     command: restore.sh
     env_file:
-      - path: .env
+      - path: ../.env
         required: false
     environment:
       PGHOST: db
@@ -77,7 +87,7 @@ services:
       PGDATABASE: ${POSTGRES_DB}
     volumes:
       - photos:/data/photos
-      - ${BACKUP_LOCAL_DIR:-./backups}:/backups/local
+      - ${BACKUP_LOCAL_DIR:-../backups}:/backups/local
     networks: [backend, frontend]
     depends_on: [db]
 

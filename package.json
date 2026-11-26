@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Concert tracker: atcgang.gekophetweb.nl",
   "scripts": {
-    "dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up",
+    "dev": "docker compose --env-file .env -f deploy/docker-compose.yml -f docker-compose.dev.yml up",
     "dev:server": "tsx watch --env-file-if-exists=.env src/server/index.ts",
     "dev:client": "vite",
     "build": "vite build && node scripts/build-server.mjs",
@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:deploy": "bats tests/deploy",
     "db:generate": "drizzle-kit generate"
   },
   "devEngines": {

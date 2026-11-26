@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Fake curl: records notifications, and fails the health URL when the running image is "bad".
+F=${FAKE:?}
+echo "curl $*" >>"$F/calls"
+url=${*: -1}
+case $url in
+  http://notify.test/*) printf '%s\n' "$*" >>"$F/notify" ;;
+  *)
+    [[ -e $F/curl_fail ]] && exit 22
+    grep -qx "$(cat "$F/running" 2>/dev/null)" "$F/bad" 2>/dev/null && exit 22 ;;
+esac
+exit 0

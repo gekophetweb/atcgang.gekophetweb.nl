@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Fake git. Without $FAKE/git_repo the root is "not a repository".
+#   git_head      current commit        git_next   commit a pull moves to
+#   git_changed   paths that differ     git_pull_fail
+F=${FAKE:?}
+echo "git $*" >>"$F/calls"
+[[ $1 == -C ]] && shift 2
+[[ -e $F/git_repo ]] || exit 128
+case $1 in
+  rev-parse) [[ $2 == --is-inside-work-tree ]] && { echo true; exit 0; }; cat "$F/git_head" ;;
+  pull)
+    [[ -e $F/git_pull_fail ]] && { echo "fatal: Not possible to fast-forward" >&2; exit 1; }
+    [[ -e $F/git_next ]] && mv "$F/git_next" "$F/git_head" ;;
+  diff) # diff --quiet A B -- paths...
+    shift 4
+    for p in "$@"; do grep -qx "$p" "$F/git_changed" 2>/dev/null && exit 1; done ;;
+esac
+exit 0

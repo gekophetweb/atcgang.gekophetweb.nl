@@ -57,13 +57,14 @@ What you end up with: four containers on the home server (`web`, `db`, `cloudfla
 
 ```bash
 sudo mkdir -p /opt/atcgang && sudo chown $USER /opt/atcgang
-git clone https://github.com/gekophetweb/atcgang.gekophetweb.nl.git /opt/atcgang
+git clone --branch main --filter=blob:none --sparse https://github.com/gekophetweb/atcgang.gekophetweb.nl.git /opt/atcgang
 cd /opt/atcgang
+git sparse-checkout set deploy backup
 cp .env.example .env
 chmod 600 .env
 ```
 
-Only `docker-compose.yml`, `.env`, `backup/` and `deploy/` are used on the server; cloning everything is simply the easiest way to get them.
+This is a sparse checkout of `main`: only `deploy/` (compose file and update script), `backup/` and the top-level files. The app itself arrives as a Docker image. `.env` sets `COMPOSE_FILE=deploy/docker-compose.yml`, so every `docker compose ...` command in this manual works from `/opt/atcgang`.
 
 ### Step 2: Fill in the basics in `.env`
 
@@ -111,7 +112,7 @@ The CI workflow publishes `ghcr.io/gekophetweb/atcgang.gekophetweb.nl:main` on e
 1. GitHub → **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)** → **Generate new token**, scope `read:packages` only, no expiry or a long one.
 2. On the server: `echo <token> | docker login ghcr.io -u <github-username> --password-stdin`
 
-Nothing has been published until `develop` is merged into `main` once. To start without CI, build locally on the server instead: `docker compose build web`.
+Nothing has been published until `develop` is merged into `main` once. To start without CI, build locally on the server instead: `git sparse-checkout disable` (gets the source), then `docker compose build web`.
 
 ### Step 6: Start it
 
@@ -349,18 +350,71 @@ Do a test restore every few months, ideally on a second machine with a copy of `
 
 Deploys are pull-based: the server checks for a new image, so CI never needs access to your home network.
 
-1. Push or merge to `main`. CI runs lint, tests and the build, then publishes `ghcr.io/gekophetweb/atcgang.gekophetweb.nl:main` (amd64 + arm64).
-2. Enable the timer on the server once:
-   ```bash
-   sudo cp /opt/atcgang/deploy/atcgang-deploy.* /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now atcgang-deploy.timer
-   ```
-3. Every 5 minutes `deploy/deploy.sh` pulls the image. If it changed, it restarts `web`, waits for `/healthz`, and rolls back to the previous image if the health check fails.
+1. Push or merge to `main` (with git flow: finish a release or hotfix). CI runs lint, tests, shellcheck and the update-script tests, then publishes `ghcr.io/gekophetweb/atcgang.gekophetweb.nl:main` and `:<commit sha>` (amd64 + arm64).
+2. On the server, `deploy/update.sh` runs from crontab every 5 minutes. It is silent when nothing changed. When something did, it:
+   1. takes a lock, so two runs never overlap;
+   2. runs `git pull --ff-only` in `/opt/atcgang`, so changes to `deploy/` and `backup/` arrive too (and re-applies all services if the compose file or `backup/` changed);
+   3. pulls the web image and compares it with the running one;
+   4. remembers the running image as `state/last-good` (and tags it `:last-good`);
+   5. dumps the database to `state/pre-update-<time>.dump` (keeps 5) and stops if that fails;
+   6. starts the new `web` container; it runs migrations on start;
+   7. waits for the container to be healthy, then checks `https://atcgang.gekophetweb.nl/healthz` through the tunnel;
+   8. rolls back to the last good image if that fails, and skips the failed image until a newer one is published;
+   9. removes old unused images and logs the result, plus an optional message to ntfy, Discord or Slack.
 
-Deploy right away: `/opt/atcgang/deploy/deploy.sh`. See what happened: `journalctl -u atcgang-deploy -n 50`.
+   The database is never restored automatically. Migrations therefore only *add* columns and tables; removing old ones waits for a later release, so the previous image keeps working after a rollback.
 
-If you change `docker-compose.yml`, `backup/` or `deploy/`, run `git pull` in `/opt/atcgang` and `docker compose up -d` on the server; the timer only updates the `web` image.
+### Set up the cron job (once)
+
+Run it as a normal user in the `docker` group (here `deploy`), not as root:
+
+```bash
+sudo mkdir -p /var/log/atcgang && sudo chown deploy: /var/log/atcgang
+sudo cp /opt/atcgang/deploy/logrotate.conf /etc/logrotate.d/atcgang   # change "deploy" in it to your user
+cp /opt/atcgang/deploy/update.conf.example /opt/atcgang/update.conf     # optional: NOTIFY_URL etc.
+/opt/atcgang/deploy/update.sh --dry-run                                 # see what it would do
+crontab -e
+```
+
+```
+MAILTO=you@example.com
+# check for a new release every 5 minutes
+*/5 * * * *  /opt/atcgang/deploy/update.sh >> /var/log/atcgang/update.log 2>&1
+# weekly: also update the Postgres minor version, cloudflared and the backup image (Sunday 04:30)
+30 4 * * 0   /opt/atcgang/deploy/update.sh --all >> /var/log/atcgang/update.log 2>&1
+```
+
+With the output going to the log file, cron only mails you if the script itself cannot start. For a message on every deploy and failure, set `NOTIFY_URL` in `update.conf` (an ntfy topic such as `https://ntfy.sh/<random-topic>`, a Discord webhook or a Slack webhook). Failures where the site may be down are sent with urgent priority.
+
+### By hand
+
+| Command | Does |
+| --- | --- |
+| `deploy/update.sh` | check and deploy now |
+| `deploy/update.sh --dry-run` | show what would happen, change nothing |
+| `deploy/update.sh --force` | redeploy even if the image did not change |
+| `deploy/update.sh --tag <sha>` | deploy a specific build (full commit sha) |
+| `deploy/update.sh --rollback` | go back to the last good image (and skip the current one) |
+| `deploy/update.sh --all` | also update `db` (stays on Postgres 17), `cloudflared` and `backup` |
+| `deploy/update.sh --restore-db state/pre-update-<time>.dump` | stop `web`, restore that dump, start `web`; asks first (or add `--yes`) and dumps the current database beforehand |
+
+Exit codes: `0` nothing to do or deployed · `1` deploy failed, rolled back · `2` deploy and rollback failed, the site is probably down · `3` another run is busy · `4` setup problem (no `.env`, no Docker, `git pull` cannot fast-forward, database dump failed). See what happened: `tail -n 50 /var/log/atcgang/update.log`.
+
+### Moving from the old systemd timer
+
+Servers set up before the update script used a full clone and `atcgang-deploy.timer`. Once:
+
+```bash
+sudo systemctl disable --now atcgang-deploy.timer
+sudo rm /etc/systemd/system/atcgang-deploy.{service,timer} && sudo systemctl daemon-reload
+cd /opt/atcgang && git checkout main && git pull --ff-only
+git sparse-checkout set deploy backup        # optional: drop the source code from the server
+echo 'COMPOSE_FILE=deploy/docker-compose.yml' >> .env
+sed -i 's|^BACKUP_LOCAL_DIR=./backups|BACKUP_LOCAL_DIR=../backups|' .env   # now relative to deploy/
+docker compose up -d
+```
+
+Then set up the cron job as above. The project name stays `atcgang`, so the database and photo volumes are the same ones.
 
 ---
 

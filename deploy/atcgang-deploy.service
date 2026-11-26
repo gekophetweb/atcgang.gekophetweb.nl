@@ -1,9 +1,0 @@
-[Unit]
-Description=Deploy atcgang web image if a new one is published
-After=docker.service network-online.target
-Requires=docker.service
-
-[Service]
-Type=oneshot
-WorkingDirectory=/opt/atcgang
-ExecStart=/opt/atcgang/deploy/deploy.sh

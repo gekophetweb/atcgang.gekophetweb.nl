@@ -105,7 +105,7 @@ A single Bash script on the home server that checks for a new release and deploy
 ### Install layout on the host
 
 ```
-/opt/atcgang/                 sparse git checkout of `main`, only the deploy/ folder
+/opt/atcgang/                 sparse git checkout of `main`: deploy/ and backup/ (backup is built on the host)
   deploy/update.sh
   deploy/docker-compose.yml
   deploy/update.conf.example
@@ -115,7 +115,7 @@ A single Bash script on the home server that checks for a new release and deploy
 /var/log/atcgang/update.log   rotated weekly by logrotate (config shipped in deploy/)
 ```
 
-`docker-compose.yml` references the web image as `${WEB_IMAGE:-ghcr.io/gekophetweb/atcgang-web:main}`, so the script can pin an exact digest for rollback. If the GHCR package is private, run `docker login ghcr.io` once with a read-only (`read:packages`) token.
+`docker-compose.yml` references the web image as `${WEB_IMAGE:-ghcr.io/gekophetweb/atcgang.gekophetweb.nl:main}`, so the script can pin an exact digest for rollback. If the GHCR package is private, run `docker login ghcr.io` once with a read-only (`read:packages`) token.
 
 ### What one run does
 
@@ -149,7 +149,7 @@ A single Bash script on the home server that checks for a new release and deploy
 ### `update.conf` (all optional)
 
 ```
-WEB_IMAGE_REPO=ghcr.io/gekophetweb/atcgang-web
+WEB_IMAGE_REPO=ghcr.io/gekophetweb/atcgang.gekophetweb.nl
 CHANNEL=main                 # image tag to follow
 HEALTH_URL=https://atcgang.gekophetweb.nl/healthz
 HEALTH_TIMEOUT=120

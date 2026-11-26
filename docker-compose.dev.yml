@@ -1,10 +1,11 @@
 # Dev override: hot reload, db port on localhost only, no tunnel, no backups.
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#   docker compose --env-file .env -f deploy/docker-compose.yml -f docker-compose.dev.yml up   (= pnpm dev)
+# Relative paths resolve against deploy/ (the first file's folder), hence the `..`.
 services:
   web:
     image: atcgang-dev
     build:
-      context: .
+      context: ..
       target: deps
     command: sh -c "pnpm install --frozen-lockfile && (pnpm dev:client & pnpm dev:server)"
     environment:
@@ -12,9 +13,12 @@ services:
       BASE_URL: http://localhost:5173
       PHOTO_DIR: /data/photos
     volumes:
-      - .:/app
+      - ..:/app
       - /app/node_modules
       - photos:/data/photos
+    # The deps stage has no curl.
+    healthcheck:
+      disable: true
     ports:
       - "127.0.0.1:5173:5173"
       - "127.0.0.1:3000:3000"
