@@ -43,6 +43,7 @@ if [[ $1 == compose ]]; then
       echo "$WEB_IMAGE" >>"$F/deployed" ;;
     exec)
       case $last in
+        *pg_database_size*) cat "$F/db_size" 2>/dev/null || echo 1048576 ;;
         *pg_dump*) [[ -e $F/dump_fail ]] && exit 1; echo DUMPDATA ;;
         *pg_restore*) cat >"$F/restored" ;;
       esac ;;

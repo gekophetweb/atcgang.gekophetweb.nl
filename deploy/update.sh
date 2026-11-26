@@ -23,7 +23,10 @@ CHANNEL=main
 HEALTH_URL=https://atcgang.gekophetweb.nl/healthz
 HEALTH_TIMEOUT=120
 KEEP_DUMPS=5
+MIN_FREE_MB=1024
 NOTIFY_URL=
+ERROR_NOTIFY_AFTER=2
+ERROR_REPEAT_HOURS=24
 STATE_DIR=$ROOT/state
 LOCK_FILE=/var/lock/atcgang-update.lock
 POLL_INTERVAL=2
@@ -64,7 +67,42 @@ done
 
 # ---------- helpers ----------
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
-fail() { log "ERROR: $2" >&2; exit "$1"; }
+fail() {
+  log "ERROR: $2" >&2
+  [[ $1 != 4 ]] || report_error "$2"
+  exit "$1"
+}
+
+# Exit-4 problems (git, registry, disk, dump) only reach the log, so tell someone – but only when the
+# same error comes back ERROR_NOTIFY_AFTER runs in a row, and then at most every ERROR_REPEAT_HOURS.
+# state/last-error: count, time of the last notification (0 = none), message.
+report_error() {
+  [[ ! -t 1 ]] && ! $DRY_RUN || return 0 # someone runs it by hand and sees the error
+  mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+  local f=$STATE_DIR/last-error count=0 notified=0 prev='' now
+  now=$(date +%s)
+  if [[ -f $f ]]; then
+    { read -r count; read -r notified; read -r prev; } <"$f" || true
+  fi
+  if [[ $prev == "$1" ]]; then count=$((count + 1)); else count=1 notified=0; fi
+  if ((count >= ERROR_NOTIFY_AFTER)) && ((notified == 0 || now - notified >= ERROR_REPEAT_HOURS * 3600)); then
+    notified=$now
+    notify "update failed" "$1 (failed $count runs in a row; nothing was deployed)" || true
+  fi
+  printf '%s\n%s\n%s\n' "$count" "$notified" "$1" >"$f"
+}
+
+# Called on success: forget the last error, and say so if we had notified about it.
+clear_error() {
+  local f=$STATE_DIR/last-error count notified=0
+  [[ -f $f ]] && ! $DRY_RUN || return 0
+  { read -r count; read -r notified; } <"$f" || true
+  rm -f "$f"
+  if ((notified != 0)); then
+    log "update.sh works again after $count failed run(s)"
+    notify "recovered" "update.sh runs normally again"
+  fi
+}
 
 # Run a changing command, or only print it with --dry-run.
 run() {
@@ -133,6 +171,21 @@ up_web() {
   local ref=$1; shift
   $DRY_RUN && log "dry-run: web would run $ref"
   WEB_IMAGE=$ref run dc up -d --no-deps --no-build "$@" web
+}
+
+# Prints a reason and fails when STATE_DIR lacks room for a dump (database size + MIN_FREE_MB to spare).
+check_disk() {
+  local size_b=0 free_kb need_kb
+  if db_running; then
+    # shellcheck disable=SC2016 # expanded inside the db container
+    size_b=$(dc exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pg_database_size(current_database())"' 2>/dev/null | tr -dc 0-9 || true)
+  fi
+  free_kb=$(df -Pk "$STATE_DIR" | awk 'NR == 2 { print $4 }')
+  need_kb=$((${size_b:-0} / 1024 + MIN_FREE_MB * 1024))
+  if ((free_kb < need_kb)); then
+    echo "not enough disk space: $((free_kb / 1024)) MB free in $STATE_DIR, need $((need_kb / 1024)) MB (database $((${size_b:-0} / 1048576)) MB + MIN_FREE_MB $MIN_FREE_MB)"
+    return 1
+  fi
 }
 
 snapshot_db() {
@@ -223,6 +276,7 @@ if [[ -n $RESTORE_FILE ]]; then
     [[ $answer == yes ]] || fail 4 "cancelled"
   fi
   log "restoring the database from $RESTORE_FILE"
+  disk_msg=$(check_disk) || fail 4 "$disk_msg; nothing changed"
   snapshot_db || fail 4 "could not snapshot the current database first; nothing changed"
   run dc stop web
   # pg_restore exits non-zero on harmless warnings (e.g. missing roles), so carry on and let the health check decide.
@@ -312,6 +366,7 @@ fi
 
 if ! $WEB_CHANGED && ! $STACK_CHANGED && ! $ALL; then
   $DRY_RUN && log "dry-run: nothing to do (web is up to date)"
+  clear_error
   exit 0
 fi
 
@@ -324,6 +379,7 @@ if $WEB_CHANGED; then WEB_REF=$TARGET; else WEB_REF=$WEB_IMAGE_REPO:last-good; f
 [[ -n $current_id ]] || WEB_REF=$TARGET
 
 # ---------- 5. snapshot the database ----------
+disk_msg=$(check_disk) || fail 4 "$disk_msg; not updating"
 snapshot_db || fail 4 "database snapshot failed; not updating"
 
 # ---------- 6. deploy ----------
@@ -360,5 +416,6 @@ docker image prune -f --filter until=168h >/dev/null 2>&1 || log "warning: image
 
 # ---------- 10. report ----------
 log "deploy OK: web $(short "$new_id")"
+clear_error
 notify "deployed" "web $(short "$new_id") is live$($ALL && echo ' (with --all)')"
 exit 0

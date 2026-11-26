@@ -384,7 +384,7 @@ MAILTO=you@example.com
 30 4 * * 0   /opt/atcgang/deploy/update.sh --all >> /var/log/atcgang/update.log 2>&1
 ```
 
-With the output going to the log file, cron only mails you if the script itself cannot start. For a message on every deploy and failure, set `NOTIFY_URL` in `update.conf` (an ntfy topic such as `https://ntfy.sh/<random-topic>`, a Discord webhook or a Slack webhook). Failures where the site may be down are sent with urgent priority.
+With the output going to the log file, cron only mails you if the script itself cannot start. For a message on every deploy and failure, set `NOTIFY_URL` in `update.conf` (an ntfy topic such as `https://ntfy.sh/<random-topic>`, a Discord webhook or a Slack webhook). Failures where the site may be down are sent with urgent priority. Setup problems that stop an update before anything changes (`git pull`, the registry, low disk space, the database dump) are reported once the same error happens two runs in a row, repeated at most daily, with a "recovered" message when it works again. Before the dump the script also checks that `state/` has room for the database plus `MIN_FREE_MB` (1 GB).
 
 ### By hand
 
@@ -395,7 +395,7 @@ With the output going to the log file, cron only mails you if the script itself 
 | `deploy/update.sh --force` | redeploy even if the image did not change |
 | `deploy/update.sh --tag <sha>` | deploy a specific build (full commit sha) |
 | `deploy/update.sh --rollback` | go back to the last good image (and skip the current one) |
-| `deploy/update.sh --all` | also update `db` (stays on Postgres 17), `cloudflared` and `backup` |
+| `deploy/update.sh --all` | also update `db` (stays on Postgres 17), `cloudflared` (pinned in `deploy/docker-compose.yml`; bump the tag there to upgrade) and `backup` |
 | `deploy/update.sh --restore-db state/pre-update-<time>.dump` | stop `web`, restore that dump, start `web`; asks first (or add `--yes`) and dumps the current database beforehand |
 
 Exit codes: `0` nothing to do or deployed · `1` deploy failed, rolled back · `2` deploy and rollback failed, the site is probably down · `3` another run is busy · `4` setup problem (no `.env`, no Docker, `git pull` cannot fast-forward, database dump failed). See what happened: `tail -n 50 /var/log/atcgang/update.log`.

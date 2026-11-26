@@ -12,10 +12,16 @@ HEALTH_TIMEOUT=120
 
 # Pre-update database dumps to keep in state/.
 KEEP_DUMPS=5
+# Free space (MB) to keep in state/ on top of the database size; less and the update stops.
+MIN_FREE_MB=1024
 
 # Message on every deploy and failure: an ntfy topic URL (https://ntfy.sh/<topic>),
 # a Discord webhook or a Slack incoming webhook. Empty = no messages.
 NOTIFY_URL=
+# Setup problems (git pull, registry, disk space, dump) are reported once the same error
+# happens this many runs in a row, then again at most every ERROR_REPEAT_HOURS.
+ERROR_NOTIFY_AFTER=2
+ERROR_REPEAT_HOURS=24
 
 # Rarely needed.
 #STATE_DIR=/opt/atcgang/state

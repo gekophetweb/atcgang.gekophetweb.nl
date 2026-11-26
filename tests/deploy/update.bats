@@ -175,6 +175,68 @@ refute() { if "$@"; then echo "expected this to fail: $*" >&2; return 1; fi; }
   [ ! -e "$STATE/pre-update-20200101-000001.dump" ]
 }
 
+@test "not enough disk space for a dump: exits 4 before deploying" {
+  echo MIN_FREE_MB=999999999 >>"$ROOT/update.conf"
+  new_release
+  run "$SCRIPT"
+  [ "$status" -eq 4 ]
+  [[ $output == *"not enough disk space"* ]]
+  [ "$(cat "$FAKE/running")" = img-old ]
+  refute ls "$STATE"/pre-update-*.dump 2>/dev/null
+}
+
+@test "disk check counts the database size" {
+  echo MIN_FREE_MB=0 >>"$ROOT/update.conf"
+  echo $((1024 * 1024 * 1024 * 1024 * 1024)) >"$FAKE/db_size" # 1 PiB
+  new_release
+  run "$SCRIPT"
+  [ "$status" -eq 4 ]
+  [[ $output == *"database 1073741824 MB"* ]]
+}
+
+@test "setup errors: notify on the 2nd run in a row, not again, then say recovered" {
+  touch "$FAKE/pull_fail"
+  run "$SCRIPT"
+  [ "$status" -eq 4 ]
+  [ ! -e "$FAKE/notify" ]
+
+  run "$SCRIPT"
+  [ "$status" -eq 4 ]
+  [ "$(grep -c "update failed" "$FAKE/notify")" -eq 1 ]
+  grep -q "failed 2 runs in a row" "$FAKE/notify"
+
+  run "$SCRIPT"
+  [ "$(grep -c "update failed" "$FAKE/notify")" -eq 1 ]
+
+  rm "$FAKE/pull_fail"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ $output == *"works again after 3 failed run(s)"* ]]
+  grep -q "recovered" "$FAKE/notify"
+  [ ! -e "$STATE/last-error" ]
+}
+
+@test "setup errors: a one-off failure is forgotten without any message" {
+  touch "$FAKE/pull_fail"
+  run "$SCRIPT"
+  rm "$FAKE/pull_fail"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$FAKE/notify" ]
+  [ ! -e "$STATE/last-error" ]
+}
+
+@test "setup errors: a repeated notification after ERROR_REPEAT_HOURS" {
+  touch "$FAKE/pull_fail"
+  run "$SCRIPT"
+  run "$SCRIPT"
+  # Pretend the last notification was 25 hours ago.
+  sed -i "2s/.*/$(($(date +%s) - 25 * 3600))/" "$STATE/last-error"
+  run "$SCRIPT"
+  [ "$(grep -c "update failed" "$FAKE/notify")" -eq 2 ]
+}
+
 @test "db not running: deploys without a snapshot" {
   touch "$FAKE/db_down"
   new_release
