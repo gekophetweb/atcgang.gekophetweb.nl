@@ -1,0 +1,7 @@
+allowBuilds:
+  esbuild: true
+  sharp: true
+  cpu-features: false
+  ssh2: false
+  protobufjs: false
+  '@tanstack/react-router': false

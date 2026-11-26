@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.superpowers/
+coverage/
+playwright-report/
+test-results/
+*.log
+data/
+e2e/.outbox.jsonl
+
+# Home server: update.sh state and local settings
+/state/
+/update.conf
+/backups/

@@ -1,0 +1,28 @@
+# Optional overrides for deploy/update.sh. Copy to /opt/atcgang/update.conf (next to .env).
+# Every line is optional; the values shown are the defaults.
+
+# Image to follow, and the tag (CI publishes :main and :<commit sha>).
+WEB_IMAGE_REPO=ghcr.io/gekophetweb/atcgang.gekophetweb.nl
+CHANNEL=main
+
+# Checked through the Cloudflare Tunnel after the container reports healthy. Empty = skip.
+HEALTH_URL=https://atcgang.gekophetweb.nl/healthz
+# Seconds to wait for the web container to become healthy.
+HEALTH_TIMEOUT=120
+
+# Pre-update database dumps to keep in state/.
+KEEP_DUMPS=5
+# Free space (MB) to keep in state/ on top of the database size; less and the update stops.
+MIN_FREE_MB=1024
+
+# Message on every deploy and failure: an ntfy topic URL (https://ntfy.sh/<topic>),
+# a Discord webhook or a Slack incoming webhook. Empty = no messages.
+NOTIFY_URL=
+# Setup problems (git pull, registry, disk space, dump) are reported once the same error
+# happens this many runs in a row, then again at most every ERROR_REPEAT_HOURS.
+ERROR_NOTIFY_AFTER=2
+ERROR_REPEAT_HOURS=24
+
+# Rarely needed.
+#STATE_DIR=/opt/atcgang/state
+#LOCK_FILE=/var/lock/atcgang-update.lock

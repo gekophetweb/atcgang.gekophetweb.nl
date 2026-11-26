@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Fake docker for tests/deploy/update.bats. State lives in $FAKE:
+#   registry[-<tag>]  image id the registry serves     running  image id of the web container (empty = none)
+#   locals            "ref id" lines of local images   bad      image ids that turn unhealthy
+#   db_down, dump_fail, pull_fail                      flags
+F=${FAKE:?}
+echo "docker $*" >>"$F/calls"
+
+lookup() {
+  case $1 in
+    img-*) echo "$1" ;;
+    *@sha256:*) echo "${1#*@sha256:}" ;;
+    *) awk -v r="$1" '$1 == r { id = $2 } END { if (id) print id }' "$F/locals" 2>/dev/null ;;
+  esac
+}
+running() { cat "$F/running" 2>/dev/null; }
+is_bad() { grep -qx "$1" "$F/bad" 2>/dev/null; }
+
+if [[ $1 == compose ]]; then
+  shift
+  while [[ $1 == --env-file || $1 == -f ]]; do shift 2; done
+  sub=$1; shift
+  last=${*: -1}
+  case $sub in
+    version) ;;
+    ps)
+      if [[ $last == web ]]; then
+        [[ -s $F/running && ! -e $F/web_stopped ]] && echo cid-web
+      else
+        [[ -e $F/db_down ]] || echo cid-db
+      fi ;;
+    pull)
+      if [[ " $* " == *" web "* ]]; then
+        [[ -e $F/pull_fail ]] && { echo "pull failed" >&2; exit 1; }
+        tag=${WEB_IMAGE##*:}
+        id=$(cat "$F/registry-$tag" 2>/dev/null || cat "$F/registry")
+        echo "$WEB_IMAGE $id" >>"$F/locals"
+      fi ;;
+    up)
+      id=$(lookup "$WEB_IMAGE")
+      [[ -n $id ]] || { echo "no such image: $WEB_IMAGE" >&2; exit 1; }
+      echo "$id" >"$F/running"
+      echo "$WEB_IMAGE" >>"$F/deployed" ;;
+    exec)
+      case $last in
+        *pg_database_size*) cat "$F/db_size" 2>/dev/null || echo 1048576 ;;
+        *pg_dump*) [[ -e $F/dump_fail ]] && exit 1; echo DUMPDATA ;;
+        *pg_restore*) cat >"$F/restored" ;;
+      esac ;;
+    stop) touch "$F/web_stopped" ;;
+    start) rm -f "$F/web_stopped" ;;
+  esac
+  exit 0
+fi
+
+case $1 in
+  inspect) # inspect -f FORMAT container
+    id=$(running)
+    case $3 in
+      *.State.Health*) if is_bad "$id"; then echo unhealthy; else echo healthy; fi ;;
+      *.Image*) echo "$id" ;;
+    esac ;;
+  image)
+    case $2 in
+      inspect) # image inspect -f FORMAT ref
+        id=$(lookup "$5")
+        [[ -n $id ]] || exit 1
+        case $4 in
+          *RepoDigests*) echo "${REPO:?}@sha256:$id" ;;
+          *) echo "$id" ;;
+        esac ;;
+    esac ;;
+  tag) echo "$3 $(lookup "$2")" >>"$F/locals" ;;
+  buildx) echo "sha256:$(cat "$F/registry")" ;;
+esac
+exit 0
