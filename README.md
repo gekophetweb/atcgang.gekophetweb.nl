@@ -112,7 +112,7 @@ The CI workflow publishes `ghcr.io/gekophetweb/atcgang.gekophetweb.nl:main` on e
 1. GitHub → **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)** → **Generate new token**, scope `read:packages` only, no expiry or a long one.
 2. On the server: `echo <token> | docker login ghcr.io -u <github-username> --password-stdin`
 
-Nothing has been published until `develop` is merged into `main` once. To start without CI, build locally on the server instead: `git sparse-checkout disable` (gets the source), then `docker compose build web`.
+To start without the CI image (for example while CI is down), build locally on the server instead: `git sparse-checkout disable` (gets the source), then `docker compose build web`.
 
 ### Step 6: Start it
 
